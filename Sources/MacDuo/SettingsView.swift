@@ -96,10 +96,21 @@ struct SettingsView: View {
 
     private var startGroup: some View {
         group("Start") {
+            toggleRow(
+                "Adaptive trigger angle",
+                isOn: $preferences.isAdaptiveTriggerAngleEnabled,
+                help: nil
+            )
             slider(
-                "Start angle", value: $preferences.thresholdAngle, in: 5...130, format: "%.0f°",
+                "Angle learning time", value: $preferences.adaptiveLearningDuration,
+                in: 5...60, format: "%.0f s", step: 1
+            )
+            .disabled(!preferences.isAdaptiveTriggerAngleEnabled)
+            slider(
+                "Start angle", value: displayedStartAngle, in: 5...130, format: "%.0f°",
                 help: "The effect starts at this angle."
             )
+            .disabled(preferences.isAdaptiveTriggerAngleEnabled)
             slider(
                 "Full effect after", value: $preferences.blurSpan, in: 5...60, format: "%.0f°",
                 help: "Degrees of further closing to reach full strength."
@@ -203,6 +214,19 @@ struct SettingsView: View {
         )
     }
 
+    private var displayedStartAngle: Binding<Double> {
+        Binding(
+            get: {
+                if preferences.isAdaptiveTriggerAngleEnabled,
+                   let learned = preferences.learnedTriggerAngle {
+                    return learned
+                }
+                return preferences.thresholdAngle
+            },
+            set: { preferences.thresholdAngle = $0 }
+        )
+    }
+
     private var permissionNotice: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Screen Recording permission is required to show the depth effect.")
@@ -254,6 +278,7 @@ struct SettingsView: View {
         in range: ClosedRange<Double>,
         format: String,
         scale: Double = 1,
+        step: Double? = nil,
         help: LocalizedStringKey? = nil
     ) -> some View {
         let reading = String(format: format, value.wrappedValue * scale)
@@ -265,11 +290,19 @@ struct SettingsView: View {
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
-            Slider(value: value, in: range)
-                .labelsHidden()
-                .controlSize(.small)
-                .accessibilityLabel(Text(title))
-                .accessibilityValue(reading)
+            if let step {
+                Slider(value: value, in: range, step: step)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .accessibilityLabel(Text(title))
+                    .accessibilityValue(reading)
+            } else {
+                Slider(value: value, in: range)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .accessibilityLabel(Text(title))
+                    .accessibilityValue(reading)
+            }
             description(help)
         }
     }

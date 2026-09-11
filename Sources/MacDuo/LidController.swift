@@ -48,6 +48,9 @@ final class LidController: ObservableObject {
     private var isSuspended = false
     private var isCapturePending = false
     private var lastMovedDownTime: CFTimeInterval = -.greatestFiniteMagnitude
+    private var lastMeaningfulMotionTime: CFTimeInterval = -.greatestFiniteMagnitude
+    private var effectStartAngle: Double?
+    private var adaptiveAngleTracker = AdaptiveAngleTracker()
     private var builtInLayout = Layout()
 
     private static let idlePollInterval: TimeInterval = 1.0 / 8
@@ -71,6 +74,12 @@ final class LidController: ObservableObject {
     /// The overlay stays up at least this long. A prediction can fire while the
     /// last reading is still above the release angle.
     private static let minimumEffectDuration: TimeInterval = 0.35
+
+    /// In adaptive mode, a stopped lid becomes a new resting-angle candidate.
+    private static let adaptiveSettleReleaseDelay: TimeInterval = 2
+
+    /// Movement below this speed is treated as normal sensor or desk noise.
+    private static let meaningfulMotionSpeed: Double = 0.75
 
     /// A scripted angle sweep, so the settings panel can show the effect
     /// without the lid moving. It feeds the same path the sensor feeds.
@@ -139,17 +148,20 @@ final class LidController: ObservableObject {
         streamer.stop()
         overlay.discardLive()
         isActive = false
+        effectStartAngle = nil
+        adaptiveAngleTracker.reset()
     }
 
     /// Plays the effect once on the current screen contents.
     func runPreview() {
         guard preview == nil, !isActive else { return }
+        let startAngle = effectiveStartAngle
         // Well above the trigger angle, so the sweep runs the pre-warm the way
         // a real close does.
         preview = PreviewRun(
             startedAt: CACurrentMediaTime(),
-            open: min(preferences.thresholdAngle + 35, 130),
-            shut: max(preferences.thresholdAngle - preferences.blurSpan * 1.15, 5)
+            open: min(startAngle + 35, 130),
+            shut: max(startAngle - preferences.blurSpan * 1.15, 5)
         )
         setPollInterval(Self.activePollInterval)
     }
@@ -200,13 +212,15 @@ final class LidController: ObservableObject {
             angle = read
         }
 
+        let now = CACurrentMediaTime()
         rawAngle = angle
-        updateVelocity(with: angle)
+        updateVelocity(with: angle, at: now)
         publish(angle: angle)
+        updateAdaptiveAngle(with: angle, at: now)
 
         reconcile(angle: angle)
 
-        let prewarmZone = preferences.thresholdAngle + preferences.prewarmCeiling
+        let prewarmZone = effectiveStartAngle + preferences.prewarmCeiling
         let wantsFastPolling = preview != nil || isActive || angle <= prewarmZone + Self.fastPollMargin
         setPollInterval(wantsFastPolling ? Self.activePollInterval : Self.idlePollInterval)
     }
@@ -215,9 +229,13 @@ final class LidController: ObservableObject {
     /// angle for release and keeps a lid held below the angle showing.
     private func wantsEffect(angle: Double) -> Bool {
         guard preferences.isEnabled else { return false }
-        let threshold = preferences.thresholdAngle
+        let threshold = effectStartAngle ?? effectiveStartAngle
         if isActive {
             guard CACurrentMediaTime() - startedAt > Self.minimumEffectDuration else { return true }
+            if preferences.isAdaptiveTriggerAngleEnabled,
+               CACurrentMediaTime() - lastMeaningfulMotionTime >= Self.adaptiveSettleReleaseDelay {
+                return false
+            }
             return angle < threshold + preferences.hysteresis
         }
         // A lid resting below the angle must not start by itself.
@@ -246,12 +264,11 @@ final class LidController: ObservableObject {
             // A visible overlay with no link would sit at its first frame.
             if overlay.isVisible, displayLink == nil { startDisplayLink() }
         } else {
-            updatePrewarm(angle: angle, ceiling: preferences.thresholdAngle + preferences.prewarmCeiling)
+            updatePrewarm(angle: angle, ceiling: effectiveStartAngle + preferences.prewarmCeiling)
         }
     }
 
-    private func updateVelocity(with angle: Double) {
-        let now = CACurrentMediaTime()
+    private func updateVelocity(with angle: Double, at now: CFTimeInterval) {
         guard let last = lastChangedAngle else {
             lastChangedAngle = angle
             lastChangeTime = now
@@ -273,6 +290,23 @@ final class LidController: ObservableObject {
         }
         if angularVelocity <= -preferences.closingSpeed {
             lastClosingTime = now
+        }
+        if abs(angularVelocity) >= Self.meaningfulMotionSpeed {
+            lastMeaningfulMotionTime = now
+        }
+    }
+
+    private func updateAdaptiveAngle(with angle: Double, at now: CFTimeInterval) {
+        let mayLearn = preferences.isAdaptiveTriggerAngleEnabled && preview == nil && !isActive
+        guard let learned = adaptiveAngleTracker.observe(
+            angle: angle,
+            at: now,
+            learningDuration: preferences.adaptiveLearningDuration,
+            isLearningAllowed: mayLearn
+        ) else { return }
+
+        if preferences.acceptLearnedTriggerAngle(learned) {
+            Diagnostics.lid.notice("adaptive trigger learned at \(learned, format: .fixed(precision: 2)) degrees")
         }
     }
 
@@ -316,6 +350,7 @@ final class LidController: ObservableObject {
     // MARK: - Depth effect
 
     private func setActive(_ active: Bool) {
+        if active { effectStartAngle = effectiveStartAngle }
         isActive = active
         if active {
             startedAt = CACurrentMediaTime()
@@ -327,6 +362,7 @@ final class LidController: ObservableObject {
             stopDisplayLink()
             overlay.dismiss(animated: true)
             snapshotter.discard()
+            effectStartAngle = nil
         }
     }
 
@@ -340,7 +376,7 @@ final class LidController: ObservableObject {
         if preferences.isLivePicture, let screen = NSScreen.builtIn,
            overlay.showLive(
                on: screen,
-               startAngle: preferences.thresholdAngle,
+               startAngle: effectStartAngle ?? effectiveStartAngle,
                tuning: tuning,
                fadeIn: Self.fadeInDuration
            ) {
@@ -410,7 +446,7 @@ final class LidController: ObservableObject {
         overlay.show(
             image: image,
             on: screen,
-            startAngle: preferences.thresholdAngle,
+            startAngle: effectStartAngle ?? effectiveStartAngle,
             tuning: tuning,
             fadeIn: Self.fadeInDuration
         )
@@ -420,7 +456,16 @@ final class LidController: ObservableObject {
 
     private func blurProgress(for angle: Double) -> Double {
         let span = max(preferences.blurSpan, 1)
-        return min(max((preferences.thresholdAngle - angle) / span, 0), 1)
+        let startAngle = effectStartAngle ?? effectiveStartAngle
+        return min(max((startAngle - angle) / span, 0), 1)
+    }
+
+    private var effectiveStartAngle: Double {
+        if preferences.isAdaptiveTriggerAngleEnabled,
+           let learned = preferences.learnedTriggerAngle {
+            return learned
+        }
+        return preferences.thresholdAngle
     }
 
     // MARK: - Animation
@@ -523,6 +568,8 @@ final class LidController: ObservableObject {
         preview = nil
         isActive = false
         isCapturePending = false
+        effectStartAngle = nil
+        adaptiveAngleTracker.reset()
     }
 
     private func resume() {
@@ -534,6 +581,8 @@ final class LidController: ObservableObject {
         angularVelocity = 0
         lastClosingTime = -.greatestFiniteMagnitude
         lastMovedDownTime = -.greatestFiniteMagnitude
+        lastMeaningfulMotionTime = -.greatestFiniteMagnitude
+        adaptiveAngleTracker.reset()
         if let angle = sensor.angle() {
             rawAngle = angle
             visualAngle.reset(to: angle)

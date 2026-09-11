@@ -9,6 +9,9 @@ final class Preferences: ObservableObject {
     private enum Key {
         static let isEnabled = "isEnabled"
         static let thresholdAngle = "thresholdAngle"
+        static let isAdaptiveTriggerAngleEnabled = "isAdaptiveTriggerAngleEnabled"
+        static let adaptiveLearningDuration = "adaptiveLearningDuration"
+        static let learnedTriggerAngle = "learnedTriggerAngle"
         static let blurSpan = "blurSpan"
         static let maxBlurRadius = "maxBlurRadius"
         static let maxDim = "maxDim"
@@ -20,7 +23,8 @@ final class Preferences: ObservableObject {
         static let isLivePicture = "isLivePicture"
 
         static let all = [
-            isEnabled, thresholdAngle, blurSpan, maxBlurRadius,
+            isEnabled, thresholdAngle, isAdaptiveTriggerAngleEnabled,
+            adaptiveLearningDuration, learnedTriggerAngle, blurSpan, maxBlurRadius,
             maxDim, viewingDistance, recession, blurEvenness, dimReach,
             showsAngleInMenuBar, isLivePicture,
         ]
@@ -29,6 +33,8 @@ final class Preferences: ObservableObject {
     private static let factory: [String: Any] = [
         Key.isEnabled: true,
         Key.thresholdAngle: 90.0,
+        Key.isAdaptiveTriggerAngleEnabled: false,
+        Key.adaptiveLearningDuration: 12.0,
         Key.blurSpan: 60.0,
         Key.maxBlurRadius: 135.0,
         Key.maxDim: 1.0,
@@ -48,6 +54,27 @@ final class Preferences: ObservableObject {
     /// Closing past this angle starts the depth effect. Degrees.
     @Published var thresholdAngle: Double {
         didSet { defaults.set(thresholdAngle, forKey: Key.thresholdAngle) }
+    }
+
+    /// Learn the trigger from the angle at which the lid has been resting.
+    @Published var isAdaptiveTriggerAngleEnabled: Bool {
+        didSet { defaults.set(isAdaptiveTriggerAngleEnabled, forKey: Key.isAdaptiveTriggerAngleEnabled) }
+    }
+
+    /// Seconds the lid must remain stable before accepting a new angle.
+    @Published var adaptiveLearningDuration: Double {
+        didSet { defaults.set(adaptiveLearningDuration, forKey: Key.adaptiveLearningDuration) }
+    }
+
+    /// Last angle accepted by the adaptive tracker. `nil` uses the manual angle.
+    @Published private(set) var learnedTriggerAngle: Double? {
+        didSet {
+            if let learnedTriggerAngle {
+                defaults.set(learnedTriggerAngle, forKey: Key.learnedTriggerAngle)
+            } else {
+                defaults.removeObject(forKey: Key.learnedTriggerAngle)
+            }
+        }
     }
 
     /// How many degrees below the threshold the blur takes to reach maximum.
@@ -136,6 +163,9 @@ final class Preferences: ObservableObject {
         for key in Self.retired { defaults.removeObject(forKey: key) }
         isEnabled = defaults.bool(forKey: Key.isEnabled)
         thresholdAngle = defaults.double(forKey: Key.thresholdAngle)
+        isAdaptiveTriggerAngleEnabled = defaults.bool(forKey: Key.isAdaptiveTriggerAngleEnabled)
+        adaptiveLearningDuration = defaults.double(forKey: Key.adaptiveLearningDuration)
+        learnedTriggerAngle = (defaults.object(forKey: Key.learnedTriggerAngle) as? NSNumber)?.doubleValue
         blurSpan = defaults.double(forKey: Key.blurSpan)
         maxBlurRadius = defaults.double(forKey: Key.maxBlurRadius)
         maxDim = defaults.double(forKey: Key.maxDim)
@@ -153,6 +183,9 @@ final class Preferences: ObservableObject {
         }
         isEnabled = defaults.bool(forKey: Key.isEnabled)
         thresholdAngle = defaults.double(forKey: Key.thresholdAngle)
+        isAdaptiveTriggerAngleEnabled = defaults.bool(forKey: Key.isAdaptiveTriggerAngleEnabled)
+        adaptiveLearningDuration = defaults.double(forKey: Key.adaptiveLearningDuration)
+        learnedTriggerAngle = nil
         blurSpan = defaults.double(forKey: Key.blurSpan)
         maxBlurRadius = defaults.double(forKey: Key.maxBlurRadius)
         maxDim = defaults.double(forKey: Key.maxDim)
@@ -162,5 +195,13 @@ final class Preferences: ObservableObject {
         dimReach = defaults.double(forKey: Key.dimReach)
         showsAngleInMenuBar = defaults.bool(forKey: Key.showsAngleInMenuBar)
         isLivePicture = defaults.bool(forKey: Key.isLivePicture)
+    }
+
+    @discardableResult
+    func acceptLearnedTriggerAngle(_ angle: Double) -> Bool {
+        let accepted = min(max(angle, 5), 130)
+        if let learnedTriggerAngle, abs(learnedTriggerAngle - accepted) < 0.25 { return false }
+        learnedTriggerAngle = accepted
+        return true
     }
 }

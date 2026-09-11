@@ -9,6 +9,8 @@
 "Off holds the frame from when the effect started." = "关闭后将定格效果开始时的画面。";
 
 "Start" = "触发";
+"Adaptive trigger angle" = "自适应触发角度";
+"Angle learning time" = "角度学习时间";
 "Start angle" = "开始角度";
 "The effect starts at this angle." = "屏幕合到这个角度时开始显示效果。";
 "Full effect after" = "达到完整效果";
