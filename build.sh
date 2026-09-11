@@ -8,12 +8,16 @@
 #
 # Uses ad-hoc signing by default. macOS may require Screen Recording permission
 # again after rebuilding. Set SIGN_IDENTITY to use your own signing identity.
+# APP_NAME, APP_DISPLAY_NAME, and BUNDLE_IDENTIFIER may be overridden by a
+# packaging script without changing the upstream app metadata.
 
 set -euo pipefail
 cd "$(dirname "$0")"
 
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
-APP_NAME="Mac Duo"
+APP_NAME="${APP_NAME:-Mac Duo}"
+APP_DISPLAY_NAME="${APP_DISPLAY_NAME:-$APP_NAME}"
+BUNDLE_IDENTIFIER="${BUNDLE_IDENTIFIER:-}"
 BUNDLE="build/${APP_NAME}.app"
 
 BUILD_ARGS=(-c release)
@@ -37,6 +41,11 @@ rm -rf "$BUNDLE"
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
 cp "$BINARY" "$BUNDLE/Contents/MacOS/MacDuo"
 cp Resources/Info.plist "$BUNDLE/Contents/Info.plist"
+plutil -replace CFBundleName -string "$APP_DISPLAY_NAME" "$BUNDLE/Contents/Info.plist"
+plutil -replace CFBundleDisplayName -string "$APP_DISPLAY_NAME" "$BUNDLE/Contents/Info.plist"
+if [[ -n "$BUNDLE_IDENTIFIER" ]]; then
+  plutil -replace CFBundleIdentifier -string "$BUNDLE_IDENTIFIER" "$BUNDLE/Contents/Info.plist"
+fi
 cp LICENSE NOTICE "$BUNDLE/Contents/Resources/"
 for localization in Resources/*.lproj; do
   [[ -d "$localization" ]] || continue
@@ -52,6 +61,7 @@ if [[ "$SIGN_IDENTITY" == - ]]; then
   TIMESTAMP=--timestamp=none
 fi
 codesign --force --options runtime "$TIMESTAMP" \
+  --identifier "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$BUNDLE/Contents/Info.plist")" \
   --sign "$SIGN_IDENTITY" "$BUNDLE"
 codesign --verify --strict --verbose=1 "$BUNDLE"
 

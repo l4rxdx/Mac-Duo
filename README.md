@@ -52,6 +52,23 @@ The script creates `build/Mac Duo.app` with an ad-hoc signature. Open it from Fi
 
 macOS may require Screen Recording permission again after rebuilding with ad-hoc signing.
 
+### Simplified Chinese local install and updates
+
+For the Simplified Chinese build on a Mac with one Apple Development or
+Developer ID Application signing identity, run:
+
+```sh
+./install-zh-cn.sh
+```
+
+The script always installs the same app identity at
+`/Applications/Mac Duo 中文版.app`, signs it with the same Apple-issued
+identity, and keeps the previous build under `build/install-backups/`. This
+allows macOS to recognize later builds as updates and retain Screen Recording
+permission. Migrating from an ad-hoc build requires granting the permission one
+final time; subsequent updates made with the same signing identity should keep
+it.
+
 ## Known limitations
 
 - Only MacBooks with a compatible lid angle sensor can use the effect. The app reports when no sensor is available.
