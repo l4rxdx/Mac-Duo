@@ -58,6 +58,7 @@ struct SettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             hasScreenPermission = CGPreflightScreenCaptureAccess()
         }
+        .environment(\.locale, preferences.interfaceLanguage.locale)
     }
 
     private var header: some View {
@@ -154,6 +155,7 @@ struct SettingsView: View {
 
     private var appGroup: some View {
         VStack(alignment: .leading, spacing: 8) {
+            languagePicker
             toggleRow("Show angle in menu bar", isOn: $preferences.showsAngleInMenuBar, help: nil)
             toggleRow("Launch at login", isOn: $launchesAtLogin, help: nil)
                 .onChange(of: launchesAtLogin) { _, newValue in
@@ -175,6 +177,36 @@ struct SettingsView: View {
             }
             .font(.caption2)
             .padding(.top, 2)
+        }
+    }
+
+    private var languagePicker: some View {
+        HStack {
+            Text("Language")
+            Spacer()
+            Picker("Language", selection: $preferences.interfaceLanguage) {
+                ForEach(Preferences.InterfaceLanguage.allCases) { language in
+                    languageLabel(language)
+                        .tag(language)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .controlSize(.small)
+            .fixedSize()
+            .accessibilityLabel("Language")
+        }
+    }
+
+    @ViewBuilder
+    private func languageLabel(_ language: Preferences.InterfaceLanguage) -> some View {
+        switch language {
+        case .system:
+            Text("Follow System")
+        case .simplifiedChinese:
+            Text("Simplified Chinese")
+        case .english:
+            Text("English")
         }
     }
 

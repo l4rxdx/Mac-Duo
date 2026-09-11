@@ -33,6 +33,10 @@
 
 "Show angle in menu bar" = "在菜单栏显示角度";
 "Launch at login" = "登录时启动";
+"Language" = "语言";
+"Follow System" = "跟随系统";
+"Simplified Chinese" = "简体中文";
+"English" = "English";
 "Reset" = "恢复默认设置";
 "Quit" = "退出";
 "Made by " = "作者：";

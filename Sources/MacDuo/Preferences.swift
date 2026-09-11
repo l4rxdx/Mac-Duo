@@ -6,7 +6,27 @@ import Foundation
 final class Preferences: ObservableObject {
     static let shared = Preferences()
 
+    enum InterfaceLanguage: String, CaseIterable, Identifiable {
+        case system
+        case simplifiedChinese = "zh-Hans"
+        case english = "en"
+
+        var id: Self { self }
+
+        var locale: Locale {
+            switch self {
+            case .system:
+                .autoupdatingCurrent
+            case .simplifiedChinese:
+                Locale(identifier: rawValue)
+            case .english:
+                Locale(identifier: rawValue)
+            }
+        }
+    }
+
     private enum Key {
+        static let interfaceLanguage = "interfaceLanguage"
         static let isEnabled = "isEnabled"
         static let thresholdAngle = "thresholdAngle"
         static let isAdaptiveTriggerAngleEnabled = "isAdaptiveTriggerAngleEnabled"
@@ -23,7 +43,7 @@ final class Preferences: ObservableObject {
         static let isLivePicture = "isLivePicture"
 
         static let all = [
-            isEnabled, thresholdAngle, isAdaptiveTriggerAngleEnabled,
+            interfaceLanguage, isEnabled, thresholdAngle, isAdaptiveTriggerAngleEnabled,
             adaptiveLearningDuration, learnedTriggerAngle, blurSpan, maxBlurRadius,
             maxDim, viewingDistance, recession, blurEvenness, dimReach,
             showsAngleInMenuBar, isLivePicture,
@@ -31,6 +51,7 @@ final class Preferences: ObservableObject {
     }
 
     private static let factory: [String: Any] = [
+        Key.interfaceLanguage: InterfaceLanguage.system.rawValue,
         Key.isEnabled: true,
         Key.thresholdAngle: 90.0,
         Key.isAdaptiveTriggerAngleEnabled: false,
@@ -45,6 +66,11 @@ final class Preferences: ObservableObject {
         Key.showsAngleInMenuBar: false,
         Key.isLivePicture: true,
     ]
+
+    /// Language used by the settings panel. The system choice tracks macOS.
+    @Published var interfaceLanguage: InterfaceLanguage {
+        didSet { defaults.set(interfaceLanguage.rawValue, forKey: Key.interfaceLanguage) }
+    }
 
     /// Master switch for the depth effect.
     @Published var isEnabled: Bool {
@@ -161,6 +187,9 @@ final class Preferences: ObservableObject {
         let defaults = UserDefaults.standard
         defaults.register(defaults: Self.factory)
         for key in Self.retired { defaults.removeObject(forKey: key) }
+        interfaceLanguage = InterfaceLanguage(
+            rawValue: defaults.string(forKey: Key.interfaceLanguage) ?? ""
+        ) ?? .system
         isEnabled = defaults.bool(forKey: Key.isEnabled)
         thresholdAngle = defaults.double(forKey: Key.thresholdAngle)
         isAdaptiveTriggerAngleEnabled = defaults.bool(forKey: Key.isAdaptiveTriggerAngleEnabled)
@@ -181,6 +210,9 @@ final class Preferences: ObservableObject {
         for key in Key.all {
             defaults.removeObject(forKey: key)
         }
+        interfaceLanguage = InterfaceLanguage(
+            rawValue: defaults.string(forKey: Key.interfaceLanguage) ?? ""
+        ) ?? .system
         isEnabled = defaults.bool(forKey: Key.isEnabled)
         thresholdAngle = defaults.double(forKey: Key.thresholdAngle)
         isAdaptiveTriggerAngleEnabled = defaults.bool(forKey: Key.isAdaptiveTriggerAngleEnabled)

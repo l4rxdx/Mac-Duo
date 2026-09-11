@@ -69,6 +69,9 @@ permission. Migrating from an ad-hoc build requires granting the permission one
 final time; subsequent updates made with the same signing identity should keep
 it.
 
+Use **Language** at the bottom of the settings panel to switch between Follow
+System, Simplified Chinese, and English without reinstalling the app.
+
 ## Known limitations
 
 - Only MacBooks with a compatible lid angle sensor can use the effect. The app reports when no sensor is available.
