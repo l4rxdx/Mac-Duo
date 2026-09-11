@@ -6,10 +6,6 @@ final class TriggerAnglePolicyTests: XCTestCase {
         XCTAssertEqual(resolved(learned: 111, offset: 10), 101)
     }
 
-    func testNegativeOffsetAdvancesAdaptiveTrigger() {
-        XCTAssertEqual(resolved(learned: 111, offset: -10), 121)
-    }
-
     func testZeroOffsetUsesLearnedAngle() {
         XCTAssertEqual(resolved(learned: 111, offset: 0), 111)
     }
@@ -32,12 +28,20 @@ final class TriggerAnglePolicyTests: XCTestCase {
 
     func testResolvedAngleStaysWithinSensorRange() {
         XCTAssertEqual(resolved(learned: 20, offset: 30), 5)
-        XCTAssertEqual(resolved(learned: 120, offset: -30), 130)
+        XCTAssertEqual(
+            TriggerAnglePolicy.resolvedStartAngle(
+                manualAngle: 140,
+                learnedAngle: nil,
+                adaptiveEnabled: false,
+                adaptiveOffset: 0
+            ),
+            130
+        )
     }
 
     func testOffsetIsLimitedToConfiguredRange() {
         XCTAssertEqual(resolved(learned: 100, offset: 100), 70)
-        XCTAssertEqual(resolved(learned: 100, offset: -100), 130)
+        XCTAssertEqual(resolved(learned: 100, offset: -100), 100)
     }
 
     private func resolved(learned: Double?, offset: Double) -> Double {

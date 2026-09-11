@@ -108,9 +108,9 @@ struct SettingsView: View {
             )
             .disabled(!preferences.isAdaptiveTriggerAngleEnabled)
             slider(
-                "Trigger angle offset", value: $preferences.adaptiveTriggerAngleOffset,
-                in: TriggerAnglePolicy.adaptiveOffsetRange, format: "%+.0f°", step: 1,
-                help: "Positive values delay the effect and negative values start it earlier."
+                "Accidental trigger buffer", value: $preferences.adaptiveTriggerAngleOffset,
+                in: TriggerAnglePolicy.adaptiveBufferRange, format: "%.0f°", step: 1,
+                help: "How much farther the lid must close before the effect starts."
             )
             .disabled(!preferences.isAdaptiveTriggerAngleEnabled)
             slider(

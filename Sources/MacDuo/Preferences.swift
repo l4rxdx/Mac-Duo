@@ -94,7 +94,7 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(adaptiveLearningDuration, forKey: Key.adaptiveLearningDuration) }
     }
 
-    /// Degrees to delay (positive) or advance (negative) the learned trigger.
+    /// Degrees the lid must close past the learned angle before triggering.
     @Published var adaptiveTriggerAngleOffset: Double {
         didSet { defaults.set(adaptiveTriggerAngleOffset, forKey: Key.adaptiveTriggerAngleOffset) }
     }

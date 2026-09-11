@@ -20,7 +20,7 @@ With the default settings, it's recommended to view the effect in front of your 
 - **Metal rendering:** Uses GPU rendering to apply perspective, blur, and dimming as the lid closes.
 - **Live screen content:** Uses ScreenCaptureKit to capture and render screen content in real time.
 - **Adjustable perspective:** Tweak the perspective to suit your viewing position and make the effect look more natural.
-- **Adaptive trigger:** Learns the resting lid angle and supports a configurable -30° to +30° trigger offset.
+- **Adaptive trigger:** Learns the resting lid angle and supports a configurable 0° to 30° accidental-trigger buffer.
 
 
 > [!NOTE]
