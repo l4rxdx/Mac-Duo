@@ -461,11 +461,12 @@ final class LidController: ObservableObject {
     }
 
     private var effectiveStartAngle: Double {
-        if preferences.isAdaptiveTriggerAngleEnabled,
-           let learned = preferences.learnedTriggerAngle {
-            return learned
-        }
-        return preferences.thresholdAngle
+        TriggerAnglePolicy.resolvedStartAngle(
+            manualAngle: preferences.thresholdAngle,
+            learnedAngle: preferences.learnedTriggerAngle,
+            adaptiveEnabled: preferences.isAdaptiveTriggerAngleEnabled,
+            adaptiveOffset: preferences.adaptiveTriggerAngleOffset
+        )
     }
 
     // MARK: - Animation

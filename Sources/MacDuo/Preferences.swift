@@ -31,6 +31,7 @@ final class Preferences: ObservableObject {
         static let thresholdAngle = "thresholdAngle"
         static let isAdaptiveTriggerAngleEnabled = "isAdaptiveTriggerAngleEnabled"
         static let adaptiveLearningDuration = "adaptiveLearningDuration"
+        static let adaptiveTriggerAngleOffset = "adaptiveTriggerAngleOffset"
         static let learnedTriggerAngle = "learnedTriggerAngle"
         static let blurSpan = "blurSpan"
         static let maxBlurRadius = "maxBlurRadius"
@@ -44,7 +45,7 @@ final class Preferences: ObservableObject {
 
         static let all = [
             interfaceLanguage, isEnabled, thresholdAngle, isAdaptiveTriggerAngleEnabled,
-            adaptiveLearningDuration, learnedTriggerAngle, blurSpan, maxBlurRadius,
+            adaptiveLearningDuration, adaptiveTriggerAngleOffset, learnedTriggerAngle, blurSpan, maxBlurRadius,
             maxDim, viewingDistance, recession, blurEvenness, dimReach,
             showsAngleInMenuBar, isLivePicture,
         ]
@@ -56,6 +57,7 @@ final class Preferences: ObservableObject {
         Key.thresholdAngle: 90.0,
         Key.isAdaptiveTriggerAngleEnabled: false,
         Key.adaptiveLearningDuration: 12.0,
+        Key.adaptiveTriggerAngleOffset: 3.0,
         Key.blurSpan: 60.0,
         Key.maxBlurRadius: 135.0,
         Key.maxDim: 1.0,
@@ -90,6 +92,11 @@ final class Preferences: ObservableObject {
     /// Seconds the lid must remain stable before accepting a new angle.
     @Published var adaptiveLearningDuration: Double {
         didSet { defaults.set(adaptiveLearningDuration, forKey: Key.adaptiveLearningDuration) }
+    }
+
+    /// Degrees to delay (positive) or advance (negative) the learned trigger.
+    @Published var adaptiveTriggerAngleOffset: Double {
+        didSet { defaults.set(adaptiveTriggerAngleOffset, forKey: Key.adaptiveTriggerAngleOffset) }
     }
 
     /// Last angle accepted by the adaptive tracker. `nil` uses the manual angle.
@@ -194,6 +201,7 @@ final class Preferences: ObservableObject {
         thresholdAngle = defaults.double(forKey: Key.thresholdAngle)
         isAdaptiveTriggerAngleEnabled = defaults.bool(forKey: Key.isAdaptiveTriggerAngleEnabled)
         adaptiveLearningDuration = defaults.double(forKey: Key.adaptiveLearningDuration)
+        adaptiveTriggerAngleOffset = defaults.double(forKey: Key.adaptiveTriggerAngleOffset)
         learnedTriggerAngle = (defaults.object(forKey: Key.learnedTriggerAngle) as? NSNumber)?.doubleValue
         blurSpan = defaults.double(forKey: Key.blurSpan)
         maxBlurRadius = defaults.double(forKey: Key.maxBlurRadius)
@@ -217,6 +225,7 @@ final class Preferences: ObservableObject {
         thresholdAngle = defaults.double(forKey: Key.thresholdAngle)
         isAdaptiveTriggerAngleEnabled = defaults.bool(forKey: Key.isAdaptiveTriggerAngleEnabled)
         adaptiveLearningDuration = defaults.double(forKey: Key.adaptiveLearningDuration)
+        adaptiveTriggerAngleOffset = defaults.double(forKey: Key.adaptiveTriggerAngleOffset)
         learnedTriggerAngle = nil
         blurSpan = defaults.double(forKey: Key.blurSpan)
         maxBlurRadius = defaults.double(forKey: Key.maxBlurRadius)

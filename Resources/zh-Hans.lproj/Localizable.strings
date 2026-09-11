@@ -11,6 +11,8 @@
 "Start" = "触发";
 "Adaptive trigger angle" = "自适应触发角度";
 "Angle learning time" = "角度学习时间";
+"Trigger angle offset" = "触发角度偏移";
+"Positive values delay the effect and negative values start it earlier." = "正值延后触发并减少误触，负值提前触发。";
 "Start angle" = "开始角度";
 "The effect starts at this angle." = "屏幕合到这个角度时开始显示效果。";
 "Full effect after" = "达到完整效果";

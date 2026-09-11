@@ -108,6 +108,12 @@ struct SettingsView: View {
             )
             .disabled(!preferences.isAdaptiveTriggerAngleEnabled)
             slider(
+                "Trigger angle offset", value: $preferences.adaptiveTriggerAngleOffset,
+                in: TriggerAnglePolicy.adaptiveOffsetRange, format: "%+.0f°", step: 1,
+                help: "Positive values delay the effect and negative values start it earlier."
+            )
+            .disabled(!preferences.isAdaptiveTriggerAngleEnabled)
+            slider(
                 "Start angle", value: displayedStartAngle, in: 5...130, format: "%.0f°",
                 help: "The effect starts at this angle."
             )
@@ -249,11 +255,12 @@ struct SettingsView: View {
     private var displayedStartAngle: Binding<Double> {
         Binding(
             get: {
-                if preferences.isAdaptiveTriggerAngleEnabled,
-                   let learned = preferences.learnedTriggerAngle {
-                    return learned
-                }
-                return preferences.thresholdAngle
+                TriggerAnglePolicy.resolvedStartAngle(
+                    manualAngle: preferences.thresholdAngle,
+                    learnedAngle: preferences.learnedTriggerAngle,
+                    adaptiveEnabled: preferences.isAdaptiveTriggerAngleEnabled,
+                    adaptiveOffset: preferences.adaptiveTriggerAngleOffset
+                )
             },
             set: { preferences.thresholdAngle = $0 }
         )

@@ -55,6 +55,7 @@ APP_NAME="$APP_NAME" \
 APP_DISPLAY_NAME="$APP_NAME" \
 BUNDLE_IDENTIFIER="$APP_IDENTIFIER" \
 SIGN_IDENTITY="$resolved_identity" \
+SIGN_TIMESTAMP=none \
   ./build.sh
 
 codesign --verify --deep --strict --verbose=2 "$BUILT_APP"

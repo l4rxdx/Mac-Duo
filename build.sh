@@ -8,6 +8,8 @@
 #
 # Uses ad-hoc signing by default. macOS may require Screen Recording permission
 # again after rebuilding. Set SIGN_IDENTITY to use your own signing identity.
+# Set SIGN_TIMESTAMP=none for local development signing without a timestamp
+# service request; the default is auto.
 # APP_NAME, APP_DISPLAY_NAME, and BUNDLE_IDENTIFIER may be overridden by a
 # packaging script without changing the upstream app metadata.
 
@@ -15,6 +17,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
+SIGN_TIMESTAMP="${SIGN_TIMESTAMP:-auto}"
 APP_NAME="${APP_NAME:-Mac Duo}"
 APP_DISPLAY_NAME="${APP_DISPLAY_NAME:-$APP_NAME}"
 BUNDLE_IDENTIFIER="${BUNDLE_IDENTIFIER:-}"
@@ -56,8 +59,13 @@ if [ -f Resources/AppIcon.icns ]; then
 fi
 cp "$PROBE" build/lidprobe
 
+if [[ "$SIGN_TIMESTAMP" != auto && "$SIGN_TIMESTAMP" != none ]]; then
+  echo "SIGN_TIMESTAMP must be auto or none." >&2
+  exit 2
+fi
+
 TIMESTAMP=--timestamp
-if [[ "$SIGN_IDENTITY" == - ]]; then
+if [[ "$SIGN_IDENTITY" == - || "$SIGN_TIMESTAMP" == none ]]; then
   TIMESTAMP=--timestamp=none
 fi
 codesign --force --options runtime "$TIMESTAMP" \
