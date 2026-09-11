@@ -1,0 +1,40 @@
+/* Mac Duo settings — Simplified Chinese */
+
+"Lid angle" = "屏幕开合角度";
+"This Mac has no lid angle sensor. Only some MacBook models have one." = "这台 Mac 没有可用的屏幕开合角度传感器，只有部分 MacBook 型号支持。";
+
+"Depth effect" = "景深效果";
+"Leans the screen away as the lid closes." = "合上屏幕时，让画面向后倾斜。";
+"Live rendering" = "实时渲染";
+"Off holds the frame from when the effect started." = "关闭后将定格效果开始时的画面。";
+
+"Start" = "触发";
+"Start angle" = "开始角度";
+"The effect starts at this angle." = "屏幕合到这个角度时开始显示效果。";
+"Full effect after" = "达到完整效果";
+"Degrees of further closing to reach full strength." = "继续合上多少度后达到最大强度。";
+
+"Look" = "外观";
+"Blur" = "模糊";
+"Blur radius at the far edge." = "屏幕远端达到的最大模糊半径。";
+"Blur spread" = "模糊范围";
+"0 blurs the far edge only, 100 the whole picture." = "0% 仅模糊屏幕远端，100% 模糊整个画面。";
+"Dimming" = "变暗";
+"How dark the far edge goes." = "屏幕远端能够变暗的程度。";
+"Dimming spread" = "变暗范围";
+"Everything above this height goes fully dark." = "高于这个位置的画面将完全变暗。";
+
+"Perspective" = "透视";
+"Lean back" = "后倾幅度";
+"Degrees of lean per degree of closing. 1 holds it still." = "屏幕每合上 1° 时画面的后倾幅度；1.0× 会让画面相对空间保持稳定。";
+"0 keeps the sides parallel, 100 converges sharply." = "0% 保持两侧平行，100% 产生强烈的汇聚透视。";
+
+"Show angle in menu bar" = "在菜单栏显示角度";
+"Launch at login" = "登录时启动";
+"Reset" = "恢复默认设置";
+"Quit" = "退出";
+"Made by " = "作者：";
+
+"Screen Recording permission is required to show the depth effect." = "显示景深效果需要屏幕录制权限。";
+"Open System Settings" = "打开系统设置";
+"Could not open System Settings. Open it manually and enable screen recording for Mac Duo under Privacy & Security." = "无法打开系统设置。请手动前往“隐私与安全性”，为 Mac Duo 开启屏幕录制权限。";

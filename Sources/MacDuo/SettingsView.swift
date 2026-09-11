@@ -167,7 +167,11 @@ struct SettingsView: View {
         }
     }
 
-    private func toggleRow(_ title: String, isOn: Binding<Bool>, help: String?) -> some View {
+    private func toggleRow(
+        _ title: LocalizedStringKey,
+        isOn: Binding<Bool>,
+        help: LocalizedStringKey?
+    ) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
                 Text(title)
@@ -176,14 +180,14 @@ struct SettingsView: View {
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .controlSize(.small)
-                    .accessibilityLabel(title)
+                    .accessibilityLabel(Text(title))
             }
             description(help)
         }
     }
 
     @ViewBuilder
-    private func description(_ text: String?) -> some View {
+    private func description(_ text: LocalizedStringKey?) -> some View {
         if let text {
             Text(text)
                 .font(.caption2)
@@ -232,7 +236,7 @@ struct SettingsView: View {
     }
 
     private func group<Content: View>(
-        _ title: String,
+        _ title: LocalizedStringKey,
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -245,12 +249,12 @@ struct SettingsView: View {
     }
 
     private func slider(
-        _ title: String,
+        _ title: LocalizedStringKey,
         value: Binding<Double>,
         in range: ClosedRange<Double>,
         format: String,
         scale: Double = 1,
-        help: String? = nil
+        help: LocalizedStringKey? = nil
     ) -> some View {
         let reading = String(format: format, value.wrappedValue * scale)
         return VStack(alignment: .leading, spacing: 2) {
@@ -264,7 +268,7 @@ struct SettingsView: View {
             Slider(value: value, in: range)
                 .labelsHidden()
                 .controlSize(.small)
-                .accessibilityLabel(title)
+                .accessibilityLabel(Text(title))
                 .accessibilityValue(reading)
             description(help)
         }
