@@ -399,6 +399,7 @@ final class DepthRenderer {
 
     /// - Parameter corners: the picture corners projected onto the screen, in
     ///   points, listed bottom-left, bottom-right, top-right, top-left.
+    @discardableResult
     func render(
         corners: [CGPoint],
         blurStrength: Double,
@@ -408,13 +409,13 @@ final class DepthRenderer {
         dimReach: Double,
         maxBlurRadius: Double,
         maxDim: Double
-    ) {
-        guard let commands = queue.makeCommandBuffer() else { return }
+    ) -> Bool {
+        guard let commands = queue.makeCommandBuffer() else { return false }
         absorbPending(into: commands)
         guard let texture, screenSize.width > 0, screenSize.height > 0,
               let drawable = layer.nextDrawable() else {
             commands.commit()
-            return
+            return false
         }
 
         let forward = Homography.matrix(
@@ -452,7 +453,7 @@ final class DepthRenderer {
 
         guard let encoder = commands.makeRenderCommandEncoder(descriptor: pass) else {
             commands.commit()
-            return
+            return false
         }
         encoder.setRenderPipelineState(pipeline)
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 0)
@@ -461,5 +462,6 @@ final class DepthRenderer {
         encoder.endEncoding()
         commands.present(drawable)
         commands.commit()
+        return true
     }
 }

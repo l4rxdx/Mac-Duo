@@ -163,7 +163,7 @@ final class DepthOverlay {
         self.fadeIn = fadeIn
         screenSize = screen.frame.size
 
-        let pixelScale = Double(screen.backingScaleFactor)
+        let pixelScale = Double(ScreenStreamer.livePixelScale(for: screen))
         guard renderer.beginLive(screenSize: screenSize, pixelScale: CGFloat(pixelScale)) else { return false }
         buildToken += 1
         makeWindow(on: screen, pixelScale: pixelScale)
@@ -267,10 +267,11 @@ final class DepthOverlay {
         }
     }
 
-    func update(progress: Double, currentAngle: Double, tuning: DepthTuning) {
-        guard let renderer, renderer.isReady else { return }
+    @discardableResult
+    func update(progress: Double, currentAngle: Double, tuning: DepthTuning) -> Bool {
+        guard let renderer, renderer.isReady else { return false }
         self.tuning = tuning
-        renderer.render(
+        return renderer.render(
             corners: geometry.corners(
                 startAngle: startAngle,
                 currentAngle: currentAngle,

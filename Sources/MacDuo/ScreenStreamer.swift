@@ -15,6 +15,16 @@ final class ScreenStreamer {
     /// sRGB pixel format decodes it correctly.
     static let colourSpaceName = CGColorSpace.displayP3
 
+    /// Full Retina capture makes the live Gaussian pyramid miss the 60 Hz
+    /// frame budget. Three-quarter Retina stays sharp during motion while
+    /// leaving enough GPU time for every display refresh. Still captures keep
+    /// their full backing scale.
+    static let maximumLivePixelScale: CGFloat = 1.5
+
+    static func livePixelScale(for screen: NSScreen) -> CGFloat {
+        min(screen.backingScaleFactor, maximumLivePixelScale)
+    }
+
     /// Frames arrive on the stream's own queue. The newest one is kept under a
     /// lock and picked up on the main thread; the texture cache is only ever
     /// touched from the stream queue.
@@ -23,6 +33,8 @@ final class ScreenStreamer {
         private let lock = NSLock()
         private var newest: CVMetalTexture?
         private var newestID: UInt64 = 0
+        private var firstFrameTime: CFTimeInterval?
+        private var lastFrameTime: CFTimeInterval?
 
         init?(device: MTLDevice) {
             var made: CVMetalTextureCache?
@@ -40,6 +52,17 @@ final class ScreenStreamer {
             return (texture, newestID)
         }
 
+        /// Capture cadence measured at the stream callback, before frames are
+        /// reduced to the newest one for rendering.
+        func statistics() -> (frames: UInt64, duration: TimeInterval, fps: Double)? {
+            lock.lock()
+            defer { lock.unlock() }
+            guard newestID > 1, let firstFrameTime, let lastFrameTime,
+                  lastFrameTime > firstFrameTime else { return nil }
+            let duration = lastFrameTime - firstFrameTime
+            return (newestID, duration, Double(newestID - 1) / duration)
+        }
+
         func stream(
             _ stream: SCStream,
             didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
@@ -48,9 +71,6 @@ final class ScreenStreamer {
             guard type == .screen,
                   CMSampleBufferIsValid(sampleBuffer),
                   let pixels = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-
-            // Lets go of the surfaces nothing holds, so the pool keeps recycling.
-            CVMetalTextureCacheFlush(cache, 0)
 
             var wrapped: CVMetalTexture?
             let result = CVMetalTextureCacheCreateTextureFromImage(
@@ -67,6 +87,9 @@ final class ScreenStreamer {
             guard result == kCVReturnSuccess, let wrapped else { return }
 
             lock.lock()
+            let now = CACurrentMediaTime()
+            if firstFrameTime == nil { firstFrameTime = now }
+            lastFrameTime = now
             newest = wrapped
             newestID &+= 1
             lock.unlock()
@@ -82,11 +105,9 @@ final class ScreenStreamer {
     private var filter: SCContentFilter?
     private var filterDisplayID: CGDirectDisplayID?
     private var consumedID: UInt64 = 0
-    private var lastHandOver: CFTimeInterval = 0
-
-    /// Frames are handed over no faster than this. A starting stream delivers
-    /// a burst well above its asked for rate.
-    private static let minimumHandOverInterval: TimeInterval = 1.0 / 32
+    private var handedOverFrames: UInt64 = 0
+    private var firstHandOverTime: CFTimeInterval?
+    private var lastHandOverTime: CFTimeInterval?
 
     private(set) var isStarted = false
     private(set) var screen: NSScreen?
@@ -113,10 +134,25 @@ final class ScreenStreamer {
         startTask?.cancel()
         startTask = nil
         let closing = stream
+        if let statistics = receiver?.statistics() {
+            Diagnostics.geometry.notice(
+                "stream received \(statistics.frames) frames at \(statistics.fps, format: .fixed(precision: 1)) fps over \(statistics.duration, format: .fixed(precision: 2)) s"
+            )
+        }
+        if handedOverFrames > 1, let firstHandOverTime, let lastHandOverTime,
+           lastHandOverTime > firstHandOverTime {
+            let duration = lastHandOverTime - firstHandOverTime
+            let fps = Double(handedOverFrames - 1) / duration
+            Diagnostics.geometry.notice(
+                "stream handed over \(self.handedOverFrames) frames at \(fps, format: .fixed(precision: 1)) fps over \(duration, format: .fixed(precision: 2)) s"
+            )
+        }
         stream = nil
         receiver = nil
         consumedID = 0
-        lastHandOver = 0
+        handedOverFrames = 0
+        firstHandOverTime = nil
+        lastHandOverTime = nil
         Diagnostics.geometry.notice("stream stopped")
         guard let closing else { return }
         Task { try? await closing.stopCapture() }
@@ -138,11 +174,12 @@ final class ScreenStreamer {
     /// The newest frame, but only once. `nil` when nothing new has arrived
     /// since the last call.
     func newFrame() -> MTLTexture? {
-        let now = CACurrentMediaTime()
-        guard now - lastHandOver >= Self.minimumHandOverInterval else { return nil }
         guard let latest = receiver?.latest(), latest.id != consumedID else { return nil }
         consumedID = latest.id
-        lastHandOver = now
+        let now = CACurrentMediaTime()
+        if firstHandOverTime == nil { firstHandOverTime = now }
+        lastHandOverTime = now
+        handedOverFrames &+= 1
         return latest.texture
     }
 
@@ -158,13 +195,14 @@ final class ScreenStreamer {
             guard isStarted, let activeFilter = filter else { return }
 
             let configuration = SCStreamConfiguration()
-            configuration.width = Int(activeFilter.contentRect.width * CGFloat(activeFilter.pointPixelScale))
-            configuration.height = Int(activeFilter.contentRect.height * CGFloat(activeFilter.pointPixelScale))
-            configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
+            let pixelScale = min(CGFloat(activeFilter.pointPixelScale), Self.maximumLivePixelScale)
+            configuration.width = Int((activeFilter.contentRect.width * pixelScale).rounded())
+            configuration.height = Int((activeFilter.contentRect.height * pixelScale).rounded())
+            configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
             configuration.pixelFormat = kCVPixelFormatType_32BGRA
             configuration.colorSpaceName = Self.colourSpaceName
             configuration.showsCursor = false
-            configuration.queueDepth = 5
+            configuration.queueDepth = 3
             configuration.scalesToFit = false
 
             let fresh = SCStream(filter: activeFilter, configuration: configuration, delegate: nil)

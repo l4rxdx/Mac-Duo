@@ -34,6 +34,11 @@ final class LidController: ObservableObject {
     private var displayLink: CADisplayLink?
     private var lastFrameTime: CFTimeInterval = 0
     private var lastPublishTime: CFTimeInterval = 0
+    private var displayFrameCount: UInt64 = 0
+    private var submittedDisplayFrameCount: UInt64 = 0
+    private var firstDisplayFrameTime: CFTimeInterval?
+    private var slowDisplayFrameCount: UInt64 = 0
+    private var longestDisplayFrameInterval: TimeInterval = 0
 
     private var rawAngle: Double = 0
     /// Degrees per second, negative while the lid closes.
@@ -55,6 +60,8 @@ final class LidController: ObservableObject {
 
     private static let idlePollInterval: TimeInterval = 1.0 / 8
     private static let activePollInterval: TimeInterval = 1.0 / 30
+    private static let targetFramesPerSecond: Float = 60
+    private static let slowDisplayFrameInterval: TimeInterval = 1.0 / 45
     private static let fadeInDuration: TimeInterval = 0.07
     /// Degrees above the pre-warm zone at which polling speeds up.
     private static let fastPollMargin: Double = 20
@@ -479,32 +486,62 @@ final class LidController: ObservableObject {
         }
         Diagnostics.lid.notice("display link started")
         let link = window.displayLink(target: self, selector: #selector(step(_:)))
+        link.preferredFrameRateRange = CAFrameRateRange(
+            minimum: Self.targetFramesPerSecond,
+            maximum: Self.targetFramesPerSecond,
+            preferred: Self.targetFramesPerSecond
+        )
         link.add(to: .main, forMode: .common)
-        lastFrameTime = CACurrentMediaTime()
+        lastFrameTime = 0
+        displayFrameCount = 0
+        submittedDisplayFrameCount = 0
+        firstDisplayFrameTime = nil
+        slowDisplayFrameCount = 0
+        longestDisplayFrameInterval = 0
         displayLink = link
     }
 
     private func stopDisplayLink() {
+        if displayFrameCount > 1, let firstDisplayFrameTime, lastFrameTime > firstDisplayFrameTime {
+            let duration = lastFrameTime - firstDisplayFrameTime
+            let fps = Double(displayFrameCount - 1) / duration
+            let submittedFPS = submittedDisplayFrameCount > 1
+                ? Double(submittedDisplayFrameCount - 1) / duration
+                : 0
+            Diagnostics.lid.notice(
+                "display link stopped after \(self.displayFrameCount) callbacks at \(fps, format: .fixed(precision: 1)) fps; submitted \(self.submittedDisplayFrameCount) frames at \(submittedFPS, format: .fixed(precision: 1)) fps; slow callbacks \(self.slowDisplayFrameCount), longest \(self.longestDisplayFrameInterval * 1000, format: .fixed(precision: 1)) ms"
+            )
+        }
         displayLink?.invalidate()
         displayLink = nil
+        lastFrameTime = 0
+        displayFrameCount = 0
+        submittedDisplayFrameCount = 0
+        firstDisplayFrameTime = nil
+        slowDisplayFrameCount = 0
+        longestDisplayFrameInterval = 0
     }
 
     @objc private func step(_ link: CADisplayLink) {
-        let now = CACurrentMediaTime()
-        let rawInterval = now - lastFrameTime
+        let now = link.timestamp
+        if firstDisplayFrameTime == nil { firstDisplayFrameTime = now }
+        let rawInterval = lastFrameTime > 0 ? now - lastFrameTime : link.duration
         let dt = min(max(rawInterval, 1.0 / 240), 1.0 / 20)
         lastFrameTime = now
+        displayFrameCount &+= 1
+        longestDisplayFrameInterval = max(longestDisplayFrameInterval, rawInterval)
+        if rawInterval > Self.slowDisplayFrameInterval { slowDisplayFrameCount &+= 1 }
         if let frame = streamer.newFrame() {
             overlay.absorb(frame)
         }
         visualAngle.advance(to: rawAngle, dt: dt)
-        applyVisual(angle: visualAngle.value)
+        if applyVisual(angle: visualAngle.value) { submittedDisplayFrameCount &+= 1 }
     }
 
     /// The geometry takes the lid angle itself, so only the blur saturates.
-    private func applyVisual(angle: Double) {
+    private func applyVisual(angle: Double) -> Bool {
         let progress = blurProgress(for: angle)
-        overlay.update(progress: progress, currentAngle: angle, tuning: tuning)
+        return overlay.update(progress: progress, currentAngle: angle, tuning: tuning)
     }
 
     private var tuning: DepthTuning {
