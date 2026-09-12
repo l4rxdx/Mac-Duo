@@ -6,7 +6,7 @@ import simd
 
 /// Draws the picture with Metal.
 ///
-/// The picture sits on a black margin in one texture, with a Gaussian pyramid
+/// The picture sits on a black margin in one texture, with a blur pyramid
 /// over it. Each frame is one full screen pass.
 @MainActor
 final class DepthRenderer {
@@ -63,10 +63,6 @@ final class DepthRenderer {
     /// A held picture to start from, waiting for the same moment. A live
     /// frame that arrives first wins, since it is the newer of the two.
     private var pendingSeed: (buffer: MTLBuffer, width: Int, height: Int)?
-    private static var hasReportedPyramidFailure = false
-    /// Built once, re-encoded every frame.
-    private lazy var livePyramid = MPSImageGaussianPyramid(device: device, centerWeight: 0.375)
-
     var isReady: Bool { texture != nil }
 
     init?() {
@@ -106,12 +102,9 @@ final class DepthRenderer {
         // every window behind it as hidden, and apps stop drawing. The shader
         // writes alpha 1 everywhere, so blending gives the same picture.
         target.isOpaque = false
-        // Waiting for the refresh here blocks the main thread. While a capture
-        // stream leaves this app out of its own picture, the window server
-        // draws the screen twice, the drawable comes back late, and the wait
-        // lands a refresh later: 60 frames per second becomes 32. The display
-        // link already paces the drawing.
-        target.displaySyncEnabled = false
+        // CAMetalDisplayLink supplies a drawable for the display's own VSync,
+        // so keep the layer synchronized and never wait on nextDrawable here.
+        target.displaySyncEnabled = true
         target.needsDisplayOnBoundsChange = true
     }
 
@@ -211,11 +204,11 @@ final class DepthRenderer {
 
     // MARK: - Live source
 
-    /// Prepares the picture for a live stream. The margin is filled with black
-    /// once; every frame after that only overwrites the interior. Nothing is
-    /// drawn until the first frame lands.
+    /// Allocates the reusable live texture. The black clear is committed on the
+    /// same queue as later draws, so they stay ordered without blocking the
+    /// calling thread for GPU completion.
     @discardableResult
-    func beginLive(screenSize: CGSize, pixelScale: CGFloat) -> Bool {
+    func prepareLive(screenSize: CGSize, pixelScale: CGFloat) -> Bool {
         let padding = Self.paddingInPoints
         let padded = CGSize(
             width: screenSize.width + 2 * padding,
@@ -242,6 +235,20 @@ final class DepthRenderer {
             liveSize = padded
             liveScale = pixelScale
         }
+
+        return true
+    }
+
+    /// Prepares the picture for a live stream. The margin is filled with black
+    /// once; every frame after that only overwrites the interior. Nothing is
+    /// drawn until the first frame lands.
+    @discardableResult
+    func beginLive(screenSize: CGSize, pixelScale: CGFloat) -> Bool {
+        guard prepareLive(screenSize: screenSize, pixelScale: pixelScale) else { return false }
+        let padding = Self.paddingInPoints
+        let padded = liveSize
+        let width = liveTexture?.width ?? 0
+        let height = liveTexture?.height ?? 0
 
         texture = nil
         isLiveSource = true
@@ -298,9 +305,11 @@ final class DepthRenderer {
         texture = liveTexture
     }
 
-    /// Copies the newest frame into the picture and rebuilds the pyramid.
+    /// Copies the newest frame into the picture and rebuilds its mipmaps. The
+    /// blit encoder's hardware path is much cheaper per frame than the Gaussian
+    /// pyramid retained for one-off still pictures.
     private func absorbPending(into commands: MTLCommandBuffer) {
-        guard var target = liveTexture, pendingFrame != nil || pendingSeed != nil else { return }
+        guard let target = liveTexture, pendingFrame != nil || pendingSeed != nil else { return }
         let inset = Int((Self.paddingInPoints * pixelScale).rounded())
         guard let blit = commands.makeBlitCommandEncoder() else { return }
         if let frame = pendingFrame {
@@ -334,31 +343,21 @@ final class DepthRenderer {
                 destinationOrigin: MTLOrigin(x: inset, y: inset, z: 0)
             )
         }
+        blit.generateMipmaps(for: target)
+        blit.endEncoding()
         pendingFrame = nil
         pendingSeed = nil
-        blit.endEncoding()
-        let built = livePyramid.encode(
-            commandBuffer: commands,
-            inPlaceTexture: &target,
-            fallbackCopyAllocator: nil
-        )
-        if !built, !Self.hasReportedPyramidFailure {
-            Self.hasReportedPyramidFailure = true
-            Diagnostics.geometry.error("live pyramid in place encode returned false")
-        }
         liveTexture = target
         texture = target
     }
 
-    /// Frees the live picture.
+    /// Stops using the live picture. Its empty GPU allocation stays cached so
+    /// the next animation does not repeat the first-run setup cost.
     func discardLive() {
         pendingFrame = nil
         pendingSeed = nil
         if isLiveSource { texture = nil }
         isLiveSource = false
-        liveTexture = nil
-        liveSize = .zero
-        liveScale = 0
     }
 
     private func clearToBlack(_ target: MTLTexture) {
@@ -371,7 +370,6 @@ final class DepthRenderer {
               let encoder = commands.makeRenderCommandEncoder(descriptor: pass) else { return }
         encoder.endEncoding()
         commands.commit()
-        commands.waitUntilCompleted()
     }
 
     // MARK: - Still source
@@ -408,12 +406,12 @@ final class DepthRenderer {
         dimHingeFloor: Double,
         dimReach: Double,
         maxBlurRadius: Double,
-        maxDim: Double
+        maxDim: Double,
+        drawable: any CAMetalDrawable
     ) -> Bool {
         guard let commands = queue.makeCommandBuffer() else { return false }
         absorbPending(into: commands)
-        guard let texture, screenSize.width > 0, screenSize.height > 0,
-              let drawable = layer.nextDrawable() else {
+        guard let texture, screenSize.width > 0, screenSize.height > 0 else {
             commands.commit()
             return false
         }
@@ -460,8 +458,11 @@ final class DepthRenderer {
         encoder.setFragmentTexture(texture, index: 0)
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         encoder.endEncoding()
-        commands.present(drawable)
         commands.commit()
+        // CAMetalDisplayLink hands us a drawable whose presentation deadline
+        // matches this callback. Present only after all encoding is committed,
+        // as required by its delegate contract.
+        drawable.present()
         return true
     }
 }

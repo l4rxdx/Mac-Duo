@@ -110,7 +110,13 @@ final class DepthOverlay {
 
     var isVisible: Bool { window != nil }
     var isPictureReady: Bool { renderer?.isReady ?? false }
-    var hostWindow: NSWindow? { window }
+
+    func makeDisplayLink(delegate: CAMetalDisplayLinkDelegate) -> CAMetalDisplayLink? {
+        guard window != nil, let renderer else { return nil }
+        let link = CAMetalDisplayLink(metalLayer: renderer.layer)
+        link.delegate = delegate
+        return link
+    }
 
     @discardableResult
     func warmUp() -> Bool {
@@ -170,18 +176,25 @@ final class DepthOverlay {
         return window != nil
     }
 
-    /// Hands one live frame to the renderer and reveals the window once the
-    /// first one has landed.
+    /// Preallocates the live texture before the trigger is crossed. This keeps
+    /// the first visible animation from paying the GPU setup cost.
+    func prepareLive(on screen: NSScreen) {
+        guard warmUp(), let renderer else { return }
+        let pixelScale = ScreenStreamer.livePixelScale(for: screen)
+        renderer.prepareLive(screenSize: screen.frame.size, pixelScale: pixelScale)
+    }
+
+    /// Hands one live frame to the renderer. The display-link callback reveals
+    /// the window only after it has submitted that first frame.
     func absorb(_ frame: MTLTexture) {
         guard window != nil, let renderer else { return }
         renderer.absorb(frame)
-        reveal()
     }
 
-    /// Starts a live overlay from one held frame.
+    /// Starts a live overlay from one held frame. The first display-link
+    /// callback performs the hidden draw before the window fades in.
     func seed(image: CGImage) {
         guard window != nil, let renderer, renderer.seed(image: image) else { return }
-        reveal()
     }
 
     func discardLive() {
@@ -221,8 +234,6 @@ final class DepthOverlay {
                     guard let self, self.buildToken == token, self.window === window,
                           let picture else { return }
                     renderer.adopt(picture)
-                    self.update(progress: 0, currentAngle: self.startAngle, tuning: self.tuning)
-                    self.reveal()
                 }
             }
         }
@@ -268,10 +279,15 @@ final class DepthOverlay {
     }
 
     @discardableResult
-    func update(progress: Double, currentAngle: Double, tuning: DepthTuning) -> Bool {
+    func update(
+        progress: Double,
+        currentAngle: Double,
+        tuning: DepthTuning,
+        drawable: any CAMetalDrawable
+    ) -> Bool {
         guard let renderer, renderer.isReady else { return false }
         self.tuning = tuning
-        return renderer.render(
+        let submitted = renderer.render(
             corners: geometry.corners(
                 startAngle: startAngle,
                 currentAngle: currentAngle,
@@ -285,8 +301,11 @@ final class DepthOverlay {
             dimHingeFloor: gradient.dimHingeFloor,
             dimReach: tuning.dimReach,
             maxBlurRadius: tuning.maxBlurRadius,
-            maxDim: tuning.maxDim
+            maxDim: tuning.maxDim,
+            drawable: drawable
         )
+        if submitted { reveal() }
+        return submitted
     }
 
     func dismiss(animated: Bool, duration: TimeInterval = 0.22) {

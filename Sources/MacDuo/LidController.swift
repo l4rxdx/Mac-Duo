@@ -15,8 +15,18 @@ struct Layout: Equatable {
     var frame: CGRect?
 }
 
+/// `IOHIDDeviceGetReport` is synchronous and takes a few milliseconds. Keep it
+/// on one dedicated queue so a slow read cannot make the display link miss a
+/// refresh. All access after startup is serialized by `readQueue`.
+private final class LidSensorReader: @unchecked Sendable {
+    let sensor = LidAngleSensor()
+
+    var isAvailable: Bool { sensor.isAvailable }
+    func angle() -> Double? { sensor.angle() }
+}
+
 @MainActor
-final class LidController: ObservableObject {
+final class LidController: NSObject, ObservableObject, @preconcurrency CAMetalDisplayLinkDelegate {
 
     @Published private(set) var currentAngle: Double = 0
     @Published private(set) var isSensorAvailable = false
@@ -25,13 +35,14 @@ final class LidController: ObservableObject {
     let snapshotter = ScreenSnapshotter()
 
     private let preferences: Preferences
-    private let sensor = LidAngleSensor()
+    private let sensorReader = LidSensorReader()
+    private let readQueue = DispatchQueue(label: "MacDuo.lidSensor", qos: .userInteractive)
     private let overlay = DepthOverlay()
     private let streamer = ScreenStreamer()
 
     private var pollTimer: Timer?
     private var pollInterval: TimeInterval = 0
-    private var displayLink: CADisplayLink?
+    private var displayLink: CAMetalDisplayLink?
     private var lastFrameTime: CFTimeInterval = 0
     private var lastPublishTime: CFTimeInterval = 0
     private var displayFrameCount: UInt64 = 0
@@ -39,6 +50,8 @@ final class LidController: ObservableObject {
     private var firstDisplayFrameTime: CFTimeInterval?
     private var slowDisplayFrameCount: UInt64 = 0
     private var longestDisplayFrameInterval: TimeInterval = 0
+    private var slowDisplayWorkCount: UInt64 = 0
+    private var longestDisplayWorkDuration: TimeInterval = 0
 
     private var rawAngle: Double = 0
     /// Degrees per second, negative while the lid closes.
@@ -51,6 +64,7 @@ final class LidController: ObservableObject {
     private var startedAt: CFTimeInterval = 0
     private var preview: PreviewRun?
     private var isSuspended = false
+    private var isSensorReadPending = false
     private var isCapturePending = false
     private var lastMovedDownTime: CFTimeInterval = -.greatestFiniteMagnitude
     private var lastMeaningfulMotionTime: CFTimeInterval = -.greatestFiniteMagnitude
@@ -62,6 +76,7 @@ final class LidController: ObservableObject {
     private static let activePollInterval: TimeInterval = 1.0 / 30
     private static let targetFramesPerSecond: Float = 60
     private static let slowDisplayFrameInterval: TimeInterval = 1.0 / 45
+    private static let slowDisplayWorkDuration: TimeInterval = 1.0 / 120
     private static let fadeInDuration: TimeInterval = 0.07
     /// Degrees above the pre-warm zone at which polling speeds up.
     private static let fastPollMargin: Double = 20
@@ -112,15 +127,16 @@ final class LidController: ObservableObject {
 
     init(preferences: Preferences) {
         self.preferences = preferences
+        super.init()
     }
 
     // MARK: - Lifecycle
 
     func start() {
-        isSensorAvailable = sensor.isAvailable
+        isSensorAvailable = sensorReader.isAvailable
         guard isSensorAvailable else { return }
 
-        if let angle = sensor.angle() {
+        if let angle = sensorReader.angle() {
             rawAngle = angle
             currentAngle = angle
             visualAngle.reset(to: angle)
@@ -136,6 +152,9 @@ final class LidController: ObservableObject {
             MainActor.assumeIsolated { self?.runPreview() }
         }
         overlay.warmUp()
+        if preferences.isLivePicture, let screen = NSScreen.builtIn {
+            overlay.prepareLive(on: screen)
+        }
         Task {
             await snapshotter.warmFilter()
             // After the overlay has put its presence window up, so the filter
@@ -189,36 +208,55 @@ final class LidController: ObservableObject {
     private func poll() {
         guard !isSuspended else { return }
 
-        let angle: Double
         if let run = preview {
             guard let scripted = run.angle(at: CACurrentMediaTime()) else {
                 preview = nil
                 return
             }
-            angle = scripted
-        } else {
-            guard let read = sensor.angle() else {
-                consecutiveFailedReads += 1
-                if consecutiveFailedReads > 30, isActive {
-                    Diagnostics.lid.notice(
-                        """
-                        release: sensor read failed \(self.consecutiveFailedReads) times in a row, \
-                        last angle \(self.rawAngle, format: .fixed(precision: 2))
-                        """
-                    )
-                    setActive(false)
-                }
-                return
-            }
-            if consecutiveFailedReads > 0 {
-                Diagnostics.lid.notice(
-                    "sensor recovered after \(self.consecutiveFailedReads) failed reads, angle \(read, format: .fixed(precision: 2))"
-                )
-            }
-            consecutiveFailedReads = 0
-            angle = read
+            accept(angle: scripted)
+            return
         }
 
+        guard !isSensorReadPending else { return }
+        isSensorReadPending = true
+        let reader = sensorReader
+        readQueue.async { [weak self] in
+            let angle = reader.angle()
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.isSensorReadPending = false
+                    guard !self.isSuspended, self.preview == nil else { return }
+                    self.acceptSensorRead(angle)
+                }
+            }
+        }
+    }
+
+    private func acceptSensorRead(_ angle: Double?) {
+        guard let angle else {
+            consecutiveFailedReads += 1
+            if consecutiveFailedReads > 30, isActive {
+                Diagnostics.lid.notice(
+                    """
+                    release: sensor read failed \(self.consecutiveFailedReads) times in a row, \
+                    last angle \(self.rawAngle, format: .fixed(precision: 2))
+                    """
+                )
+                setActive(false)
+            }
+            return
+        }
+        if consecutiveFailedReads > 0 {
+            Diagnostics.lid.notice(
+                "sensor recovered after \(self.consecutiveFailedReads) failed reads, angle \(angle, format: .fixed(precision: 2))"
+            )
+        }
+        consecutiveFailedReads = 0
+        accept(angle: angle)
+    }
+
+    private func accept(angle: Double) {
         let now = CACurrentMediaTime()
         rawAngle = angle
         updateVelocity(with: angle, at: now)
@@ -336,6 +374,7 @@ final class LidController: ObservableObject {
         // Only the stream. Asking ScreenCaptureKit for a screenshot at the
         // same time makes it serve neither quickly.
         snapshotter.endPrewarm()
+        if let screen = NSScreen.builtIn { overlay.prepareLive(on: screen) }
         streamer.start()
     }
 
@@ -480,17 +519,19 @@ final class LidController: ObservableObject {
 
     private func startDisplayLink() {
         stopDisplayLink()
-        guard let window = overlay.hostWindow else {
+        guard let link = overlay.makeDisplayLink(delegate: self) else {
             Diagnostics.lid.notice("display link skipped, no overlay window")
             return
         }
         Diagnostics.lid.notice("display link started")
-        let link = window.displayLink(target: self, selector: #selector(step(_:)))
         link.preferredFrameRateRange = CAFrameRateRange(
             minimum: Self.targetFramesPerSecond,
             maximum: Self.targetFramesPerSecond,
             preferred: Self.targetFramesPerSecond
         )
+        // One frame is enough for this lightweight pass and keeps the lid
+        // motion from visibly trailing the physical screen.
+        link.preferredFrameLatency = 1
         link.add(to: .main, forMode: .common)
         lastFrameTime = 0
         displayFrameCount = 0
@@ -498,6 +539,8 @@ final class LidController: ObservableObject {
         firstDisplayFrameTime = nil
         slowDisplayFrameCount = 0
         longestDisplayFrameInterval = 0
+        slowDisplayWorkCount = 0
+        longestDisplayWorkDuration = 0
         displayLink = link
     }
 
@@ -509,7 +552,7 @@ final class LidController: ObservableObject {
                 ? Double(submittedDisplayFrameCount - 1) / duration
                 : 0
             Diagnostics.lid.notice(
-                "display link stopped after \(self.displayFrameCount) callbacks at \(fps, format: .fixed(precision: 1)) fps; submitted \(self.submittedDisplayFrameCount) frames at \(submittedFPS, format: .fixed(precision: 1)) fps; slow callbacks \(self.slowDisplayFrameCount), longest \(self.longestDisplayFrameInterval * 1000, format: .fixed(precision: 1)) ms"
+                "display link stopped after \(self.displayFrameCount) callbacks at \(fps, format: .fixed(precision: 1)) fps; submitted \(self.submittedDisplayFrameCount) frames at \(submittedFPS, format: .fixed(precision: 1)) fps; slow callbacks \(self.slowDisplayFrameCount), longest interval \(self.longestDisplayFrameInterval * 1000, format: .fixed(precision: 1)) ms; slow work \(self.slowDisplayWorkCount), longest work \(self.longestDisplayWorkDuration * 1000, format: .fixed(precision: 1)) ms"
             )
         }
         displayLink?.invalidate()
@@ -520,12 +563,14 @@ final class LidController: ObservableObject {
         firstDisplayFrameTime = nil
         slowDisplayFrameCount = 0
         longestDisplayFrameInterval = 0
+        slowDisplayWorkCount = 0
+        longestDisplayWorkDuration = 0
     }
 
-    @objc private func step(_ link: CADisplayLink) {
-        let now = link.timestamp
+    func metalDisplayLink(_ link: CAMetalDisplayLink, needsUpdate update: CAMetalDisplayLink.Update) {
+        let now = CACurrentMediaTime()
         if firstDisplayFrameTime == nil { firstDisplayFrameTime = now }
-        let rawInterval = lastFrameTime > 0 ? now - lastFrameTime : link.duration
+        let rawInterval = lastFrameTime > 0 ? now - lastFrameTime : 1.0 / Double(Self.targetFramesPerSecond)
         let dt = min(max(rawInterval, 1.0 / 240), 1.0 / 20)
         lastFrameTime = now
         displayFrameCount &+= 1
@@ -535,13 +580,23 @@ final class LidController: ObservableObject {
             overlay.absorb(frame)
         }
         visualAngle.advance(to: rawAngle, dt: dt)
-        if applyVisual(angle: visualAngle.value) { submittedDisplayFrameCount &+= 1 }
+        if applyVisual(angle: visualAngle.value, drawable: update.drawable) {
+            submittedDisplayFrameCount &+= 1
+        }
+        let workDuration = CACurrentMediaTime() - now
+        longestDisplayWorkDuration = max(longestDisplayWorkDuration, workDuration)
+        if workDuration > Self.slowDisplayWorkDuration { slowDisplayWorkCount &+= 1 }
     }
 
     /// The geometry takes the lid angle itself, so only the blur saturates.
-    private func applyVisual(angle: Double) -> Bool {
+    private func applyVisual(angle: Double, drawable: any CAMetalDrawable) -> Bool {
         let progress = blurProgress(for: angle)
-        return overlay.update(progress: progress, currentAngle: angle, tuning: tuning)
+        return overlay.update(
+            progress: progress,
+            currentAngle: angle,
+            tuning: tuning,
+            drawable: drawable
+        )
     }
 
     private var tuning: DepthTuning {
@@ -621,10 +676,7 @@ final class LidController: ObservableObject {
         lastMovedDownTime = -.greatestFiniteMagnitude
         lastMeaningfulMotionTime = -.greatestFiniteMagnitude
         adaptiveAngleTracker.reset()
-        if let angle = sensor.angle() {
-            rawAngle = angle
-            visualAngle.reset(to: angle)
-        }
         setPollInterval(Self.idlePollInterval)
+        poll()
     }
 }

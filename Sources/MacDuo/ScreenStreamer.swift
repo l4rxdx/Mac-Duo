@@ -15,10 +15,9 @@ final class ScreenStreamer {
     /// sRGB pixel format decodes it correctly.
     static let colourSpaceName = CGColorSpace.displayP3
 
-    /// Full Retina capture makes the live Gaussian pyramid miss the 60 Hz
-    /// frame budget. Three-quarter Retina stays sharp during motion while
-    /// leaving enough GPU time for every display refresh. Still captures keep
-    /// their full backing scale.
+    /// Three-quarter Retina keeps live motion sharp without making the window
+    /// server composite two full-resolution screen surfaces. Still captures
+    /// keep their full backing scale.
     static let maximumLivePixelScale: CGFloat = 1.5
 
     static func livePixelScale(for screen: NSScreen) -> CGFloat {
@@ -71,6 +70,10 @@ final class ScreenStreamer {
             guard type == .screen,
                   CMSampleBufferIsValid(sampleBuffer),
                   let pixels = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+
+            // Release wrappers no caller still holds so ScreenCaptureKit can
+            // recycle its small surface pool without stalling capture.
+            CVMetalTextureCacheFlush(cache, 0)
 
             var wrapped: CVMetalTexture?
             let result = CVMetalTextureCacheCreateTextureFromImage(

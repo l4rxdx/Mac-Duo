@@ -3,7 +3,7 @@ import Foundation
 /// The whole effect in one fragment shader.
 ///
 /// Each screen pixel maps back into the picture through the inverse
-/// perspective, then takes one sample from a Gaussian pyramid at a level
+/// perspective, then takes one sample from a blur pyramid at a level
 /// chosen by the blur wanted there. The texture already holds the picture on
 /// black, so the two blur together and the picture edge needs no special
 /// handling.
