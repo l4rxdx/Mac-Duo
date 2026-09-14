@@ -14,6 +14,7 @@ let package = Package(
             name: "MacDuo",
             dependencies: ["LidAngleKit"],
             path: "Sources/MacDuo",
+            resources: [.process("Metal")],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .executableTarget(

@@ -43,6 +43,15 @@ PROBE="$BIN_PATH/lidprobe"
 rm -rf "$BUNDLE"
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
 cp "$BINARY" "$BUNDLE/Contents/MacOS/MacDuo"
+if xcrun -sdk macosx metal -help >/dev/null 2>&1; then
+  xcrun -sdk macosx metal -c Sources/MacDuo/Metal/DepthShaders.metal \
+    -o build/DepthShaders.air
+  xcrun -sdk macosx metallib build/DepthShaders.air \
+    -o "$BUNDLE/Contents/Resources/DepthShaders.metallib"
+else
+  cp Sources/MacDuo/Metal/DepthShaders.metal \
+    "$BUNDLE/Contents/Resources/DepthShaders.metal"
+fi
 cp Resources/Info.plist "$BUNDLE/Contents/Info.plist"
 plutil -replace CFBundleName -string "$APP_DISPLAY_NAME" "$BUNDLE/Contents/Info.plist"
 plutil -replace CFBundleDisplayName -string "$APP_DISPLAY_NAME" "$BUNDLE/Contents/Info.plist"

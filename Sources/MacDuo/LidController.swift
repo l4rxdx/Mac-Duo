@@ -37,6 +37,7 @@ final class LidController: NSObject, ObservableObject, @preconcurrency CAMetalDi
     private let preferences: Preferences
     private let sensorReader = LidSensorReader()
     private let readQueue = DispatchQueue(label: "MacDuo.lidSensor", qos: .userInteractive)
+    private let backgroundQueue = DispatchQueue(label: "MacDuo.lockBackground", qos: .utility)
     private let overlay = DepthOverlay()
     private let streamer = ScreenStreamer()
 
@@ -69,6 +70,7 @@ final class LidController: NSObject, ObservableObject, @preconcurrency CAMetalDi
     private var lastMovedDownTime: CFTimeInterval = -.greatestFiniteMagnitude
     private var lastMeaningfulMotionTime: CFTimeInterval = -.greatestFiniteMagnitude
     private var effectStartAngle: Double?
+    private var wakeAnimation = WakeAnimationCoordinator()
     private var adaptiveAngleTracker = AdaptiveAngleTracker()
     private var builtInLayout = Layout()
 
@@ -78,6 +80,9 @@ final class LidController: NSObject, ObservableObject, @preconcurrency CAMetalDi
     private static let slowDisplayFrameInterval: TimeInterval = 1.0 / 45
     private static let slowDisplayWorkDuration: TimeInterval = 1.0 / 120
     private static let fadeInDuration: TimeInterval = 0.07
+    private static let wakeFadeOutDuration: TimeInterval = 0.08
+    private static let wakeReleaseHysteresis: Double = 1
+    private static let sleepArmingMemory: TimeInterval = 4
     /// Degrees above the pre-warm zone at which polling speeds up.
     private static let fastPollMargin: Double = 20
 
@@ -152,6 +157,7 @@ final class LidController: NSObject, ObservableObject, @preconcurrency CAMetalDi
             MainActor.assumeIsolated { self?.runPreview() }
         }
         overlay.warmUp()
+        prepareLockScreenBackground()
         if preferences.isLivePicture, let screen = NSScreen.builtIn {
             overlay.prepareLive(on: screen)
         }
@@ -173,8 +179,10 @@ final class LidController: NSObject, ObservableObject, @preconcurrency CAMetalDi
         snapshotter.endPrewarm()
         streamer.stop()
         overlay.discardLive()
+        overlay.discardLockScreenPicture()
         isActive = false
         effectStartAngle = nil
+        wakeAnimation.cancel()
         adaptiveAngleTracker.reset()
     }
 
@@ -261,6 +269,29 @@ final class LidController: NSObject, ObservableObject, @preconcurrency CAMetalDi
         rawAngle = angle
         updateVelocity(with: angle, at: now)
         publish(angle: angle)
+
+        switch wakeAnimation.observe(
+            angle: angle,
+            releaseHysteresis: Self.wakeReleaseHysteresis
+        ) {
+        case let .start(context):
+            startWakeAnimation(context)
+            return
+        case .cancel:
+            Diagnostics.lid.notice("wake animation skipped: lid already beyond its start angle")
+        case .none:
+            break
+        }
+
+        if wakeAnimation.isOpening {
+            setPollInterval(Self.activePollInterval)
+            return
+        }
+        if wakeAnimation.isPending {
+            setPollInterval(Self.activePollInterval)
+            return
+        }
+
         updateAdaptiveAngle(with: angle, at: now)
 
         reconcile(angle: angle)
@@ -396,24 +427,57 @@ final class LidController: NSObject, ObservableObject, @preconcurrency CAMetalDi
     // MARK: - Depth effect
 
     private func setActive(_ active: Bool) {
-        if active { effectStartAngle = effectiveStartAngle }
-        isActive = active
         if active {
+            effectStartAngle = effectiveStartAngle
+            isActive = true
             startedAt = CACurrentMediaTime()
             visualAngle.reset(to: rawAngle)
             snapshotter.endPrewarm()
             setPollInterval(Self.activePollInterval)
             presentPicture()
         } else {
-            stopDisplayLink()
-            overlay.dismiss(animated: true)
-            snapshotter.discard()
-            effectStartAngle = nil
+            stopActiveEffect(animated: true, cancelWake: true)
         }
     }
 
-    private func endEffect() {
-        setActive(false)
+    private func startWakeAnimation(_ context: WakeAnimationCoordinator.Context) {
+        guard preferences.isEnabled, let screen = NSScreen.builtIn,
+              overlay.showLockScreen(
+                  on: screen,
+                  startAngle: context.startAngle,
+                  tuning: tuning,
+                  fadeIn: Self.fadeInDuration
+              ) else {
+            Diagnostics.lid.notice("wake animation skipped: prewarmed lock picture unavailable")
+            wakeAnimation.cancel()
+            return
+        }
+
+        Diagnostics.lid.notice(
+            "wake animation started at raw \(self.rawAngle, format: .fixed(precision: 2)); start \(context.startAngle, format: .fixed(precision: 2))"
+        )
+        effectStartAngle = context.startAngle
+        isActive = true
+        startedAt = CACurrentMediaTime()
+        visualAngle.reset(to: rawAngle)
+        snapshotter.endPrewarm()
+        streamer.stop()
+        overlay.discardLive()
+        setPollInterval(Self.activePollInterval)
+        startDisplayLink()
+    }
+
+    private func stopActiveEffect(
+        animated: Bool,
+        duration: TimeInterval = 0.22,
+        cancelWake: Bool
+    ) {
+        stopDisplayLink()
+        overlay.dismiss(animated: animated, duration: duration)
+        snapshotter.discard()
+        isActive = false
+        effectStartAngle = nil
+        if cancelWake { wakeAnimation.cancel() }
     }
 
     /// Shows the held screenshot, or waits for one. A pre-warm capture that is
@@ -583,6 +647,19 @@ final class LidController: NSObject, ObservableObject, @preconcurrency CAMetalDi
         if applyVisual(angle: visualAngle.value, drawable: update.drawable) {
             submittedDisplayFrameCount &+= 1
         }
+        if wakeAnimation.shouldFinish(
+            rawAngle: rawAngle,
+            visualAngle: visualAngle.value,
+            releaseHysteresis: Self.wakeReleaseHysteresis
+        ) {
+            Diagnostics.lid.notice("wake animation completed at \(self.rawAngle, format: .fixed(precision: 2)) degrees")
+            wakeAnimation.finish()
+            stopActiveEffect(
+                animated: true,
+                duration: Self.wakeFadeOutDuration,
+                cancelWake: false
+            )
+        }
         let workDuration = CACurrentMediaTime() - now
         longestDisplayWorkDuration = max(longestDisplayWorkDuration, workDuration)
         if workDuration > Self.slowDisplayWorkDuration { slowDisplayWorkCount &+= 1 }
@@ -620,6 +697,13 @@ final class LidController: NSObject, ObservableObject, @preconcurrency CAMetalDi
         workspace.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.resume() }
         }
+        workspace.addObserver(
+            forName: NSWorkspace.screensDidWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.screensDidWake() }
+        }
         NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
@@ -638,35 +722,48 @@ final class LidController: NSObject, ObservableObject, @preconcurrency CAMetalDi
                     "screen parameters changed, layout now \(String(describing: layout), privacy: .public)"
                 )
                 self.builtInLayout = layout
-                if self.isActive { self.setActive(false) }
+                if self.isActive {
+                    self.stopActiveEffect(animated: false, cancelWake: true)
+                } else {
+                    self.wakeAnimation.cancel()
+                }
                 self.streamer.stop()
                 self.streamer.invalidateFilter()
                 Task { await self.streamer.warmFilter() }
                 self.overlay.discardLive()
+                self.overlay.discardLockScreenPicture()
                 self.snapshotter.discard()
                 Task { await self.snapshotter.warmFilter() }
+                self.prepareLockScreenBackground()
             }
         }
     }
 
     private func suspend() {
         Diagnostics.lid.notice("suspend")
+        let startAngle = effectStartAngle ?? effectiveStartAngle
+        wakeAnimation.armForSleep(
+            effectWasActive: isActive,
+            effectWasPreview: preview != nil,
+            isEnabled: preferences.isEnabled,
+            wasClosingRecently: CACurrentMediaTime() - lastMovedDownTime < Self.sleepArmingMemory,
+            startAngle: startAngle,
+            currentAngle: rawAngle
+        )
         isSuspended = true
-        stopDisplayLink()
-        overlay.dismiss(animated: false)
+        stopActiveEffect(animated: false, cancelWake: false)
         snapshotter.endPrewarm()
         snapshotter.discard()
         streamer.stop()
         overlay.discardLive()
         preview = nil
-        isActive = false
         isCapturePending = false
-        effectStartAngle = nil
         adaptiveAngleTracker.reset()
     }
 
     private func resume() {
         Diagnostics.lid.notice("resume")
+        wakeAnimation.workspaceDidWake()
         isSuspended = false
         // A fresh baseline, so waking with a nearly shut lid does not read as
         // closing movement.
@@ -676,7 +773,65 @@ final class LidController: NSObject, ObservableObject, @preconcurrency CAMetalDi
         lastMovedDownTime = -.greatestFiniteMagnitude
         lastMeaningfulMotionTime = -.greatestFiniteMagnitude
         adaptiveAngleTracker.reset()
-        setPollInterval(Self.idlePollInterval)
+        setPollInterval(
+            wakeAnimation.isPending ? Self.activePollInterval : Self.idlePollInterval
+        )
         poll()
+    }
+
+    private func screensDidWake() {
+        Diagnostics.lid.notice("screens did wake")
+        wakeAnimation.screensDidWake()
+        guard wakeAnimation.isPending else { return }
+        setPollInterval(Self.activePollInterval)
+        poll()
+    }
+
+    // MARK: - Lock-screen preparation
+
+    private func prepareLockScreenBackground() {
+        guard let screen = NSScreen.builtIn else { return }
+        let wallpaperURL = LockScreenBackground.wallpaperURL(for: screen)
+        let maximumPixelSize = Int(
+            ceil(max(screen.frame.width, screen.frame.height) * screen.backingScaleFactor)
+        )
+
+        guard let fallback = LockScreenBackground.fallbackImage() else {
+            prepareWallpaper(at: wallpaperURL, on: screen, maximumPixelSize: maximumPixelSize)
+            return
+        }
+        overlay.prepareLockScreen(image: fallback, on: screen) { [weak self, weak screen] _ in
+            guard let self, let screen else { return }
+            self.prepareWallpaper(at: wallpaperURL, on: screen, maximumPixelSize: maximumPixelSize)
+        }
+    }
+
+    private func prepareWallpaper(at url: URL?, on screen: NSScreen, maximumPixelSize: Int) {
+        guard let url else {
+            Diagnostics.lid.notice("lock picture ready: privacy-safe gradient")
+            return
+        }
+        let displayID = screen.displayID
+        backgroundQueue.async { [weak self] in
+            let image = LockScreenBackground.loadWallpaper(
+                at: url,
+                maximumPixelSize: maximumPixelSize
+            )
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self,
+                          let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else { return }
+                    guard let image else {
+                        Diagnostics.lid.notice("lock picture ready: wallpaper unavailable, keeping gradient")
+                        return
+                    }
+                    self.overlay.prepareLockScreen(image: image, on: screen) { prepared in
+                        Diagnostics.lid.notice(
+                            "lock picture ready: \(prepared ? "wallpaper" : "gradient fallback")"
+                        )
+                    }
+                }
+            }
+        }
     }
 }

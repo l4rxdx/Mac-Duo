@@ -72,7 +72,25 @@ final class DepthRenderer {
         self.queue = queue
 
         do {
-            let library = try device.makeLibrary(source: DepthShaders.source, options: nil)
+            let library: MTLLibrary
+            if let compiledURL = Bundle.main.url(
+                forResource: "DepthShaders",
+                withExtension: "metallib"
+            ) {
+                library = try device.makeLibrary(URL: compiledURL)
+            } else {
+                // The installer uses a precompiled library when the optional
+                // Metal toolchain is available. Its source-file fallback is
+                // still compiled during app warm-up, never at effect trigger.
+                guard let sourceURL = Bundle.main.url(
+                    forResource: "DepthShaders",
+                    withExtension: "metal"
+                ) ?? Bundle.module.url(forResource: "DepthShaders", withExtension: "metal") else {
+                    return nil
+                }
+                let source = try String(contentsOf: sourceURL, encoding: .utf8)
+                library = try device.makeLibrary(source: source, options: nil)
+            }
             let descriptor = MTLRenderPipelineDescriptor()
             descriptor.vertexFunction = library.makeFunction(name: "depthVertex")
             descriptor.fragmentFunction = library.makeFunction(name: "depthFragment")

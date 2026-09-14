@@ -9,6 +9,11 @@ final class OverlayWindow: NSWindow {
     override var canBecomeMain: Bool { false }
 }
 
+private enum OverlayEnvironment {
+    case desktop
+    case lockScreen
+}
+
 /// Where the picture lands on the glass.
 ///
 /// The picture is a sheet hinged to the bottom edge of the screen, turned back
@@ -98,7 +103,16 @@ final class DepthOverlay {
     private var renderer: DepthRenderer?
     private var hasTriedToBuildRenderer = false
     private var buildToken = 0
+    private var lockBuildToken = 0
     private let buildQueue = DispatchQueue(label: "MacDuo.pictureUpload", qos: .userInteractive)
+
+    private struct LockPicture {
+        let displayID: CGDirectDisplayID?
+        let screenSize: CGSize
+        let pixelScale: CGFloat
+        let picture: DepthRenderer.PreparedPicture
+    }
+    private var lockPicture: LockPicture?
 
     private var screenSize: CGSize = .zero
     private var startAngle: Double = 90
@@ -172,7 +186,7 @@ final class DepthOverlay {
         let pixelScale = Double(ScreenStreamer.livePixelScale(for: screen))
         guard renderer.beginLive(screenSize: screenSize, pixelScale: CGFloat(pixelScale)) else { return false }
         buildToken += 1
-        makeWindow(on: screen, pixelScale: pixelScale)
+        makeWindow(on: screen, pixelScale: pixelScale, environment: .desktop)
         return window != nil
     }
 
@@ -201,6 +215,77 @@ final class DepthOverlay {
         renderer?.discardLive()
     }
 
+    func discardLockScreenPicture() {
+        lockBuildToken += 1
+        lockPicture = nil
+    }
+
+    /// Uploads the privacy-safe lock-screen background before it is needed.
+    /// The retained Metal texture lets a wake animation skip image decoding,
+    /// bitmap allocation, and mipmap generation on its first visible frame.
+    func prepareLockScreen(
+        image: CGImage,
+        on screen: NSScreen,
+        completion: (@MainActor (Bool) -> Void)? = nil
+    ) {
+        guard warmUp(), let renderer else {
+            completion?(false)
+            return
+        }
+        let displayID = screen.displayID
+        let size = screen.frame.size
+        let pixelScale = screen.backingScaleFactor
+        lockBuildToken += 1
+        let token = lockBuildToken
+        buildQueue.async { [weak self, weak renderer] in
+            guard let renderer else { return }
+            let picture = renderer.makePicture(image: image, screenSize: size, pixelScale: pixelScale)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self, self.lockBuildToken == token else { return }
+                    if let picture {
+                        self.lockPicture = LockPicture(
+                            displayID: displayID,
+                            screenSize: size,
+                            pixelScale: pixelScale,
+                            picture: picture
+                        )
+                    }
+                    completion?(picture != nil)
+                }
+            }
+        }
+    }
+
+    /// Presents the already-uploaded lock-screen picture without capture or
+    /// disk access. The window is permitted in the login session and stays
+    /// below macOS's protected login controls.
+    @discardableResult
+    func showLockScreen(
+        on screen: NSScreen,
+        startAngle: Double,
+        tuning: DepthTuning,
+        fadeIn: TimeInterval
+    ) -> Bool {
+        dismiss(animated: false)
+        guard warmUp(), let renderer, let lockPicture,
+              lockPicture.displayID == screen.displayID,
+              lockPicture.screenSize == screen.frame.size,
+              lockPicture.pixelScale == screen.backingScaleFactor else { return false }
+
+        self.startAngle = startAngle
+        self.tuning = tuning
+        self.fadeIn = fadeIn
+        screenSize = screen.frame.size
+        renderer.adopt(lockPicture.picture)
+        buildToken += 1
+        makeWindow(
+            on: screen,
+            pixelScale: Double(lockPicture.pixelScale),
+            environment: .lockScreen
+        )
+        return window != nil
+    }
 
     func show(
         image: CGImage,
@@ -220,7 +305,7 @@ final class DepthOverlay {
             ? Double(image.width) / Double(screen.frame.width)
             : Double(screen.backingScaleFactor)
 
-        makeWindow(on: screen, pixelScale: pixelScale)
+        makeWindow(on: screen, pixelScale: pixelScale, environment: .desktop)
         guard let window else { return }
 
         buildToken += 1
@@ -239,7 +324,11 @@ final class DepthOverlay {
         }
     }
 
-    private func makeWindow(on screen: NSScreen, pixelScale: Double) {
+    private func makeWindow(
+        on screen: NSScreen,
+        pixelScale: Double,
+        environment: OverlayEnvironment
+    ) {
         guard let renderer else { return }
         let view = MetalHostView(layer: renderer.makeLayer(), scale: CGFloat(pixelScale))
         view.frame = NSRect(origin: .zero, size: screenSize)
@@ -257,7 +346,18 @@ final class DepthOverlay {
         window.hasShadow = false
         window.ignoresMouseEvents = true
         window.isReleasedWhenClosed = false
-        window.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
+        switch environment {
+        case .desktop:
+            window.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
+        case .lockScreen:
+            // Login controls use the system shielding level. The screen-saver
+            // level keeps this background above ordinary windows but below
+            // those protected controls.
+            window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.screenSaverWindow)))
+            window.canBecomeVisibleWithoutLogin = true
+            window.canHide = false
+            window.hidesOnDeactivate = false
+        }
         window.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         window.setFrame(screen.frame, display: false)
         window.alphaValue = 0
