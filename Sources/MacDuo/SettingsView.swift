@@ -189,6 +189,10 @@ struct SettingsView: View {
             }
             .font(.caption2)
             .padding(.top, 2)
+            Text("l4rxx custom edition")
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
         }
     }
 
