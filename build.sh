@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Modified by l4rxx in 2026 for the l4rxx edition.
 #
 # Builds Mac Duo.app from the SwiftPM package.
 #
@@ -24,21 +25,43 @@ BUNDLE_IDENTIFIER="${BUNDLE_IDENTIFIER:-}"
 BUNDLE="build/${APP_NAME}.app"
 
 BUILD_ARGS=(-c release)
+UNIVERSAL=false
 RUN_APP=false
 for argument in "$@"; do
   case "$argument" in
-    --universal) BUILD_ARGS+=(--arch arm64 --arch x86_64) ;;
+    --universal) UNIVERSAL=true ;;
     --run) RUN_APP=true ;;
     *) echo "Unknown argument: $argument" >&2; exit 1 ;;
   esac
 done
 
-swift build "${BUILD_ARGS[@]}" --product MacDuo
-swift build "${BUILD_ARGS[@]}" --product lidprobe
+if "$UNIVERSAL"; then
+  ARM_TRIPLE="arm64-apple-macosx14.0"
+  INTEL_TRIPLE="x86_64-apple-macosx14.0"
 
-BIN_PATH="$(swift build "${BUILD_ARGS[@]}" --show-bin-path)"
-BINARY="$BIN_PATH/MacDuo"
-PROBE="$BIN_PATH/lidprobe"
+  for product in MacDuo lidprobe; do
+    swift build "${BUILD_ARGS[@]}" --triple "$ARM_TRIPLE" --product "$product"
+    swift build "${BUILD_ARGS[@]}" --triple "$INTEL_TRIPLE" --product "$product"
+  done
+
+  ARM_BIN_PATH="$(swift build "${BUILD_ARGS[@]}" --triple "$ARM_TRIPLE" --show-bin-path)"
+  INTEL_BIN_PATH="$(swift build "${BUILD_ARGS[@]}" --triple "$INTEL_TRIPLE" --show-bin-path)"
+  UNIVERSAL_BIN_PATH="build/universal"
+  mkdir -p "$UNIVERSAL_BIN_PATH"
+  lipo -create "$ARM_BIN_PATH/MacDuo" "$INTEL_BIN_PATH/MacDuo" \
+    -output "$UNIVERSAL_BIN_PATH/MacDuo"
+  lipo -create "$ARM_BIN_PATH/lidprobe" "$INTEL_BIN_PATH/lidprobe" \
+    -output "$UNIVERSAL_BIN_PATH/lidprobe"
+  BINARY="$UNIVERSAL_BIN_PATH/MacDuo"
+  PROBE="$UNIVERSAL_BIN_PATH/lidprobe"
+else
+  swift build "${BUILD_ARGS[@]}" --product MacDuo
+  swift build "${BUILD_ARGS[@]}" --product lidprobe
+
+  BIN_PATH="$(swift build "${BUILD_ARGS[@]}" --show-bin-path)"
+  BINARY="$BIN_PATH/MacDuo"
+  PROBE="$BIN_PATH/lidprobe"
+fi
 
 rm -rf "$BUNDLE"
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"

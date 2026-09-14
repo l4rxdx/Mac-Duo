@@ -1,4 +1,5 @@
 // swift-tools-version: 6.0
+// Modified by l4rxx in 2026 for the l4rxx edition.
 import PackageDescription
 
 let package = Package(
@@ -14,7 +15,7 @@ let package = Package(
             name: "MacDuo",
             dependencies: ["LidAngleKit"],
             path: "Sources/MacDuo",
-            resources: [.process("Metal")],
+            resources: [.copy("Metal/DepthShaders.metal")],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .executableTarget(

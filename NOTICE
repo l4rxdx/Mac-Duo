@@ -2,3 +2,8 @@ Mac Duo
 Copyright 2026 Makito
 
 Originally developed by Makito.
+
+Modified by l4rxx in 2026. The modified edition adds Simplified Chinese and
+in-app language switching, adaptive trigger-angle learning, an accidental-
+trigger buffer, 60 fps rendering and first-frame warmup, and a lock-screen
+lid-opening animation.

@@ -1,8 +1,11 @@
 <div align="center">
 
-# Mac Duo
+# Mac Duo · l4rxx 修改版
 
-**Wish you could bring the iPhone Duo effect to your MacBook?**
+**简体中文、自适应角度、60 fps 与锁屏开盖动画增强版**
+
+本仓库是 [sumimakito/Mac-Duo](https://github.com/sumimakito/Mac-Duo) 的
+l4rxx 修改版，保留原作者 Makito 的署名并遵循 Apache License 2.0。
 
 https://github.com/user-attachments/assets/3ea3b098-c6d2-4398-8f3a-e9087bbb33f2
 
@@ -32,12 +35,23 @@ With the default settings, it's recommended to view the effect in front of your 
 
 ## Download
 
-[Download DMG](https://github.com/sumimakito/Mac-Duo/releases/download/dev/Mac-Duo-dev.dmg) | [Download ZIP](https://github.com/sumimakito/Mac-Duo/releases/download/dev/Mac-Duo-dev.zip)
+[下载 DMG](https://github.com/l4rxdx/Mac-Duo/releases/latest/download/Mac-Duo-l4rxx-v0.1.0.dmg) | [下载 ZIP](https://github.com/l4rxdx/Mac-Duo/releases/latest/download/Mac-Duo-l4rxx-v0.1.0.zip)
 
-These downloads contain the latest [development build](https://github.com/sumimakito/Mac-Duo/releases/tag/dev) for Apple Silicon and Intel Macs.
+以上是 l4rxx 修改版的公开构建，支持 Apple Silicon 与 Intel Mac。
+首次打开时请在 Finder 中右键应用并选择“打开”，再按提示授予屏幕录制权限。
+公开安装包使用 ad-hoc 签名，不包含维护者的个人开发证书。
 
 Requires macOS 14 or later and a MacBook with a compatible lid angle sensor.
 Grant Screen Recording permission when prompted to enable the effect.
+
+## l4rxx 修改内容
+
+- 简体中文、English 与跟随系统三种界面语言，可在应用内即时切换。
+- 自适应学习常用屏幕角度，并可设置学习时间。
+- 0°–30° 防误触角度，避免轻微调整屏幕时触发动画。
+- 60 fps 实时渲染与首帧预热，减少动画割裂和首次顿帧。
+- 真实合盖休眠后，在锁屏页面随开盖角度显示动画。
+- 固定本地安装身份，后续本机更新尽量保留屏幕录制权限。
 
 ## Build
 
@@ -85,6 +99,9 @@ System, Simplified Chinese, and English without reinstalling the app.
 ## Acknowledgements
 
 This project is built with AI assistance.
+
+Modified by [l4rxx](https://github.com/l4rxdx). Originally developed by
+[Makito](https://github.com/sumimakito).
 
 ## License
 

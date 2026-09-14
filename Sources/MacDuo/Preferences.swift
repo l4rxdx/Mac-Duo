@@ -1,3 +1,4 @@
+// Modified by l4rxx in 2026 for the l4rxx edition.
 import Combine
 import Foundation
 
