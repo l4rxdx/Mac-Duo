@@ -1,9 +1,12 @@
+// Modified by l4rxx in 2026 for the l4rxx edition.
 import AppKit
 import SwiftUI
 
 /// The menu bar item and the settings popover.
 @MainActor
 final class StatusItemController: NSObject, NSPopoverDelegate {
+
+    private static let angleStatusItemLength: CGFloat = 77
 
     private let statusItem: NSStatusItem
     private let popover = NSPopover()
@@ -15,8 +18,12 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     init(controller: LidController, preferences: Preferences) {
         self.controller = controller
         self.preferences = preferences
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        let initialLength = preferences.showsAngleInMenuBar
+            ? Self.angleStatusItemLength
+            : NSStatusItem.squareLength
+        statusItem = NSStatusBar.system.statusItem(withLength: initialLength)
         super.init()
+        statusItem.autosaveName = "MacDuoStatusItemV2"
 
         if let button = statusItem.button {
             button.image = NSImage(
@@ -102,9 +109,17 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private func refreshTitle() {
         guard let button = statusItem.button else { return }
         if preferences.showsAngleInMenuBar {
+            if statusItem.length != Self.angleStatusItemLength {
+                statusItem.length = Self.angleStatusItemLength
+            }
             button.title = String(format: " %.0f°", controller.currentAngle)
-        } else if !button.title.isEmpty {
-            button.title = ""
+        } else {
+            if statusItem.length != NSStatusItem.squareLength {
+                statusItem.length = NSStatusItem.squareLength
+            }
+            if !button.title.isEmpty {
+                button.title = ""
+            }
         }
     }
 }
