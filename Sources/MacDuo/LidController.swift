@@ -28,6 +28,11 @@ private final class LidSensorReader: @unchecked Sendable {
 @MainActor
 final class LidController: NSObject, ObservableObject, @preconcurrency CAMetalDisplayLinkDelegate {
 
+    private enum ActiveEffect {
+        case desktopClosing
+        case lockScreenOpening
+    }
+
     @Published private(set) var currentAngle: Double = 0
     @Published private(set) var isSensorAvailable = false
     @Published private(set) var isActive = false
@@ -70,9 +75,11 @@ final class LidController: NSObject, ObservableObject, @preconcurrency CAMetalDi
     private var lastMovedDownTime: CFTimeInterval = -.greatestFiniteMagnitude
     private var lastMeaningfulMotionTime: CFTimeInterval = -.greatestFiniteMagnitude
     private var effectStartAngle: Double?
+    private var activeEffect: ActiveEffect = .desktopClosing
     private var wakeAnimation = WakeAnimationCoordinator()
     private var adaptiveAngleTracker = AdaptiveAngleTracker()
     private var builtInLayout = Layout()
+    private var preferenceSubscriptions = Set<AnyCancellable>()
 
     private static let idlePollInterval: TimeInterval = 1.0 / 8
     private static let activePollInterval: TimeInterval = 1.0 / 30
@@ -157,7 +164,7 @@ final class LidController: NSObject, ObservableObject, @preconcurrency CAMetalDi
             MainActor.assumeIsolated { self?.runPreview() }
         }
         overlay.warmUp()
-        prepareLockScreenBackground()
+        observeLockScreenPreference()
         if preferences.isLivePicture, let screen = NSScreen.builtIn {
             overlay.prepareLive(on: screen)
         }
@@ -180,6 +187,7 @@ final class LidController: NSObject, ObservableObject, @preconcurrency CAMetalDi
         streamer.stop()
         overlay.discardLive()
         overlay.discardLockScreenPicture()
+        preferenceSubscriptions.removeAll()
         isActive = false
         effectStartAngle = nil
         wakeAnimation.cancel()
@@ -428,6 +436,7 @@ final class LidController: NSObject, ObservableObject, @preconcurrency CAMetalDi
 
     private func setActive(_ active: Bool) {
         if active {
+            activeEffect = .desktopClosing
             effectStartAngle = effectiveStartAngle
             isActive = true
             startedAt = CACurrentMediaTime()
@@ -441,7 +450,9 @@ final class LidController: NSObject, ObservableObject, @preconcurrency CAMetalDi
     }
 
     private func startWakeAnimation(_ context: WakeAnimationCoordinator.Context) {
-        guard preferences.isEnabled, let screen = NSScreen.builtIn,
+        guard preferences.isEnabled,
+              preferences.isLockScreenOpeningAnimationEnabled,
+              let screen = NSScreen.builtIn,
               overlay.showLockScreen(
                   on: screen,
                   startAngle: context.startAngle,
@@ -456,6 +467,7 @@ final class LidController: NSObject, ObservableObject, @preconcurrency CAMetalDi
         Diagnostics.lid.notice(
             "wake animation started at raw \(self.rawAngle, format: .fixed(precision: 2)); start \(context.startAngle, format: .fixed(precision: 2))"
         )
+        activeEffect = .lockScreenOpening
         effectStartAngle = context.startAngle
         isActive = true
         startedAt = CACurrentMediaTime()
@@ -477,6 +489,7 @@ final class LidController: NSObject, ObservableObject, @preconcurrency CAMetalDi
         snapshotter.discard()
         isActive = false
         effectStartAngle = nil
+        activeEffect = .desktopClosing
         if cancelWake { wakeAnimation.cancel() }
     }
 
@@ -745,7 +758,7 @@ final class LidController: NSObject, ObservableObject, @preconcurrency CAMetalDi
         wakeAnimation.armForSleep(
             effectWasActive: isActive,
             effectWasPreview: preview != nil,
-            isEnabled: preferences.isEnabled,
+            isEnabled: preferences.isEnabled && preferences.isLockScreenOpeningAnimationEnabled,
             wasClosingRecently: CACurrentMediaTime() - lastMovedDownTime < Self.sleepArmingMemory,
             startAngle: startAngle,
             currentAngle: rawAngle
@@ -789,8 +802,32 @@ final class LidController: NSObject, ObservableObject, @preconcurrency CAMetalDi
 
     // MARK: - Lock-screen preparation
 
+    private func observeLockScreenPreference() {
+        preferenceSubscriptions.removeAll()
+        preferences.$isLockScreenOpeningAnimationEnabled
+            .removeDuplicates()
+            .sink { [weak self] enabled in
+                guard let self else { return }
+                let setting = enabled ? "enabled" : "disabled"
+                Diagnostics.lid.notice(
+                    "lock-screen opening animation \(setting, privacy: .public)"
+                )
+                if enabled {
+                    self.prepareLockScreenBackground()
+                    return
+                }
+                self.wakeAnimation.cancel()
+                if self.isActive, self.activeEffect == .lockScreenOpening {
+                    self.stopActiveEffect(animated: false, cancelWake: false)
+                }
+                self.overlay.discardLockScreenPicture()
+            }
+            .store(in: &preferenceSubscriptions)
+    }
+
     private func prepareLockScreenBackground() {
-        guard let screen = NSScreen.builtIn else { return }
+        guard preferences.isLockScreenOpeningAnimationEnabled,
+              let screen = NSScreen.builtIn else { return }
         let wallpaperURL = LockScreenBackground.wallpaperURL(for: screen)
         let maximumPixelSize = Int(
             ceil(max(screen.frame.width, screen.frame.height) * screen.backingScaleFactor)
@@ -821,6 +858,7 @@ final class LidController: NSObject, ObservableObject, @preconcurrency CAMetalDi
                 MainActor.assumeIsolated {
                     guard let self,
                           let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else { return }
+                    guard self.preferences.isLockScreenOpeningAnimationEnabled else { return }
                     guard let image else {
                         Diagnostics.lid.notice("lock picture ready: wallpaper unavailable, keeping gradient")
                         return

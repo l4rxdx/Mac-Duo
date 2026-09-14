@@ -92,6 +92,12 @@ struct SettingsView: View {
                 help: "Off holds the frame from when the effect started."
             )
             .disabled(!preferences.isEnabled)
+            toggleRow(
+                "Lock-screen opening animation",
+                isOn: $preferences.isLockScreenOpeningAnimationEnabled,
+                help: "Shows the depth animation while the Mac opens on the lock screen."
+            )
+            .disabled(!preferences.isEnabled)
         }
     }
 

@@ -7,6 +7,8 @@
 "Leans the screen away as the lid closes." = "合上屏幕时，让画面向后倾斜。";
 "Live rendering" = "实时渲染";
 "Off holds the frame from when the effect started." = "关闭后将定格效果开始时的画面。";
+"Lock-screen opening animation" = "锁屏开盖动画";
+"Shows the depth animation while the Mac opens on the lock screen." = "在锁屏页面随开盖角度显示景深动画。";
 
 "Start" = "触发";
 "Adaptive trigger angle" = "自适应触发角度";

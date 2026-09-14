@@ -21,7 +21,7 @@ With the default settings, it's recommended to view the effect in front of your 
 - **Live screen content:** Uses ScreenCaptureKit to capture and render screen content in real time.
 - **Adjustable perspective:** Tweak the perspective to suit your viewing position and make the effect look more natural.
 - **Adaptive trigger:** Learns the resting lid angle and supports a configurable 0° to 30° accidental-trigger buffer.
-- **Lock-screen opening effect:** After a real clamshell sleep, the same depth effect follows the physical lid angle while the Mac opens on the lock screen.
+- **Lock-screen opening effect:** After a real clamshell sleep, the same depth effect follows the physical lid angle while the Mac opens on the lock screen. It can be turned off independently in settings.
 - **Warm first frame:** The Metal pipeline and a privacy-safe wallpaper texture are prepared before the trigger, avoiding capture and compilation work during wake.
 
 

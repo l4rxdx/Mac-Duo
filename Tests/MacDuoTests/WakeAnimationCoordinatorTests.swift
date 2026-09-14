@@ -82,6 +82,24 @@ final class WakeAnimationCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.phase, .idle)
     }
 
+    func testDisabledLockScreenOptionDoesNotArm() {
+        var coordinator = WakeAnimationCoordinator()
+
+        coordinator.armForSleep(
+            effectWasActive: true,
+            effectWasPreview: false,
+            isEnabled: false,
+            wasClosingRecently: true,
+            startAngle: 90,
+            currentAngle: 8
+        )
+        coordinator.workspaceDidWake()
+        coordinator.screensDidWake()
+
+        XCTAssertEqual(coordinator.observe(angle: 20, releaseHysteresis: 4), .none)
+        XCTAssertEqual(coordinator.phase, .idle)
+    }
+
     func testOpeningCompletesOnlyAfterRawAndSmoothedAnglesReachStart() {
         var coordinator = armedCoordinator()
         coordinator.workspaceDidWake()

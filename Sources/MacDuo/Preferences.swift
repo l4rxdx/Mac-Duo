@@ -28,6 +28,7 @@ final class Preferences: ObservableObject {
     private enum Key {
         static let interfaceLanguage = "interfaceLanguage"
         static let isEnabled = "isEnabled"
+        static let isLockScreenOpeningAnimationEnabled = "isLockScreenOpeningAnimationEnabled"
         static let thresholdAngle = "thresholdAngle"
         static let isAdaptiveTriggerAngleEnabled = "isAdaptiveTriggerAngleEnabled"
         static let adaptiveLearningDuration = "adaptiveLearningDuration"
@@ -44,7 +45,8 @@ final class Preferences: ObservableObject {
         static let isLivePicture = "isLivePicture"
 
         static let all = [
-            interfaceLanguage, isEnabled, thresholdAngle, isAdaptiveTriggerAngleEnabled,
+            interfaceLanguage, isEnabled, isLockScreenOpeningAnimationEnabled,
+            thresholdAngle, isAdaptiveTriggerAngleEnabled,
             adaptiveLearningDuration, adaptiveTriggerAngleOffset, learnedTriggerAngle, blurSpan, maxBlurRadius,
             maxDim, viewingDistance, recession, blurEvenness, dimReach,
             showsAngleInMenuBar, isLivePicture,
@@ -54,6 +56,7 @@ final class Preferences: ObservableObject {
     private static let factory: [String: Any] = [
         Key.interfaceLanguage: InterfaceLanguage.system.rawValue,
         Key.isEnabled: true,
+        Key.isLockScreenOpeningAnimationEnabled: true,
         Key.thresholdAngle: 90.0,
         Key.isAdaptiveTriggerAngleEnabled: false,
         Key.adaptiveLearningDuration: 12.0,
@@ -77,6 +80,16 @@ final class Preferences: ObservableObject {
     /// Master switch for the depth effect.
     @Published var isEnabled: Bool {
         didSet { defaults.set(isEnabled, forKey: Key.isEnabled) }
+    }
+
+    /// Show the angle-driven opening animation after a real clamshell wake.
+    @Published var isLockScreenOpeningAnimationEnabled: Bool {
+        didSet {
+            defaults.set(
+                isLockScreenOpeningAnimationEnabled,
+                forKey: Key.isLockScreenOpeningAnimationEnabled
+            )
+        }
     }
 
     /// Closing past this angle starts the depth effect. Degrees.
@@ -198,6 +211,9 @@ final class Preferences: ObservableObject {
             rawValue: defaults.string(forKey: Key.interfaceLanguage) ?? ""
         ) ?? .system
         isEnabled = defaults.bool(forKey: Key.isEnabled)
+        isLockScreenOpeningAnimationEnabled = defaults.bool(
+            forKey: Key.isLockScreenOpeningAnimationEnabled
+        )
         thresholdAngle = defaults.double(forKey: Key.thresholdAngle)
         isAdaptiveTriggerAngleEnabled = defaults.bool(forKey: Key.isAdaptiveTriggerAngleEnabled)
         adaptiveLearningDuration = defaults.double(forKey: Key.adaptiveLearningDuration)
@@ -222,6 +238,9 @@ final class Preferences: ObservableObject {
             rawValue: defaults.string(forKey: Key.interfaceLanguage) ?? ""
         ) ?? .system
         isEnabled = defaults.bool(forKey: Key.isEnabled)
+        isLockScreenOpeningAnimationEnabled = defaults.bool(
+            forKey: Key.isLockScreenOpeningAnimationEnabled
+        )
         thresholdAngle = defaults.double(forKey: Key.thresholdAngle)
         isAdaptiveTriggerAngleEnabled = defaults.bool(forKey: Key.isAdaptiveTriggerAngleEnabled)
         adaptiveLearningDuration = defaults.double(forKey: Key.adaptiveLearningDuration)
